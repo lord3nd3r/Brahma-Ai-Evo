@@ -498,6 +498,20 @@ class NetSentinel:
     @staticmethod
     def _send_arp(ip_str: str, host_ip: Optional[str] = None) -> Optional[Tuple[str, str]]:
         """Sends native Windows ARP request with explicit source IP binding to retrieve MAC address directly."""
+        if sys.platform.startswith("linux"):
+            try:
+                out = subprocess.check_output(
+                    ["ip", "neigh", "show", ip_str], text=True, timeout=3, stderr=subprocess.DEVNULL,
+                )
+                match = re.search(r"(([0-9a-f]{2}:){5}[0-9a-f]{2})", out, re.I)
+                if match:
+                    return ip_str, match.group(1).upper().replace(":", "-")
+                print(f"[NetSentinel] No neighbour entry for {ip_str}. The Windows SendARP path is not used here.")
+            except FileNotFoundError:
+                print("[NetSentinel] iproute2 ('ip neigh') is not installed; cannot resolve a MAC address.")
+            except Exception as exc:
+                print(f"[NetSentinel] Linux neighbour lookup failed: {exc}")
+            return None
         if sys.platform != "win32":
             return None
         try:

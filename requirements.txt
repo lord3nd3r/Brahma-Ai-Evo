@@ -9,21 +9,15 @@ duckduckgo-search
 playwright          
 pyautogui
 pyperclip
-pygetwindow       
 opencv-python
 numpy
 mediapipe
 mss
 Pillow
 psutil
-comtypes
-pycaw               
 instagrapi
-win10toast          
 send2trash
 youtube-transcript-api
-pywinauto
-pyaudio
 openpyxl
 python-pptx
 python-docx
@@ -39,3 +33,10 @@ PyQt6-WebEngine
 edge-tts
 matplotlib
 speedtest-cli
+
+# Windows-only. Pip skips these on Linux and macOS.
+comtypes; sys_platform == "win32"
+pycaw; sys_platform == "win32"
+win10toast; sys_platform == "win32"
+pywinauto; sys_platform == "win32"
+pygetwindow; sys_platform == "win32"

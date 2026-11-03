@@ -26,6 +26,23 @@ SOUNDS_DIR = BASE_DIR / "assets" / "sounds"
 SETTINGS_FILE = get_user_data_dir() / "config" / "app_settings.json"
 
 
+def _linux_audio_server() -> bool:
+    """True when a user audio daemon socket exists. QSoundEffect segfaults without one."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR", "").strip()
+    candidates = []
+    if runtime:
+        candidates.extend([
+            os.path.join(runtime, "pulse", "native"),
+            os.path.join(runtime, "pipewire-0"),
+        ])
+    uid = os.getuid()
+    candidates.extend([
+        f"/run/user/{uid}/pulse/native",
+        f"/run/user/{uid}/pipewire-0",
+    ])
+    return any(os.path.exists(path) for path in candidates)
+
+
 def _generate_default_sounds(target_dir: Path):
     """Procedurally synthesizes 16-bit 44.1kHz PCM WAV sci-fi sound assets if missing."""
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -190,6 +207,12 @@ class SoundManager(QObject):
             pass
 
     def _init_audio(self):
+        if sys.platform.startswith("linux") and not _linux_audio_server():
+            print(
+                "[SoundManager] No PulseAudio or PipeWire socket is available. "
+                "UI sound effects are off. Start PipeWire or PulseAudio to hear them."
+            )
+            return
         try:
             _generate_default_sounds(SOUNDS_DIR)
 

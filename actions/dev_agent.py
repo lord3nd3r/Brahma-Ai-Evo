@@ -1,4 +1,5 @@
 from core.user_paths import get_user_data_dir
+import shutil
 import subprocess
 import sys
 import json
@@ -271,6 +272,24 @@ def _install_dependencies(dependencies: list[str], project_dir: Path) -> str:
         return f"Install error (non-fatal): {e}"
 
 def _open_vscode(project_dir: Path) -> bool:
+    if sys.platform.startswith("linux"):
+        for cmd in ("code", "codium", "code-oss"):
+            path = shutil.which(cmd)
+            if not path:
+                continue
+            try:
+                subprocess.Popen(
+                    [path, str(project_dir)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                time.sleep(1.5)
+                print(f"[DevAgent] VS Code opened: {project_dir}")
+                return True
+            except Exception as exc:
+                print(f"[DevAgent] {cmd} failed: {exc}")
+        print("[DevAgent] VS Code was not found on PATH (looked for code, codium, code-oss).")
+        return False
     vscode_candidates = [
         "code",
         rf"C:\Users\{Path.home().name}\AppData\Local\Programs\Microsoft VS Code\bin\code.cmd",

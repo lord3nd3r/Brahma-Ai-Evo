@@ -1,5 +1,8 @@
 from __future__ import annotations
 from core.user_paths import get_user_data_dir
+from core.webengine_flags import apply_webengine_flags
+
+apply_webengine_flags()
 
 import asyncio
 import json
@@ -9,18 +12,6 @@ import os
 
 import sys
 import platform
-
-# Hardware acceleration & WebGL flags for smooth 180fps+ rendering across Windows, macOS, and Linux
-_base_chromium_flags = (
-    "--enable-gpu-rasterization --enable-zero-copy --ignore-gpu-blocklist "
-    "--enable-accelerated-2d-canvas --enable-webgl --enable-webgl2-compute-context "
-    "--disable-frame-rate-limit --disable-gpu-vsync --num-raster-threads=4 --disable-gpu-driver-bug-workarounds"
-)
-if sys.platform == "win32":
-    _base_chromium_flags += " --use-angle=d3d11"
-elif sys.platform.startswith("linux"):
-    _base_chromium_flags += " --no-sandbox --disable-dev-shm-usage"
-os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", _base_chromium_flags)
 import random
 import re
 import sys
@@ -2347,9 +2338,12 @@ class GestureCameraPreview(QFrame):
             pyautogui.PAUSE = 0
 
             try:
-                import ctypes
-                screen_w = int(ctypes.windll.user32.GetSystemMetrics(0))
-                screen_h = int(ctypes.windll.user32.GetSystemMetrics(1))
+                if sys.platform == "win32":
+                    import ctypes
+                    screen_w = int(ctypes.windll.user32.GetSystemMetrics(0))
+                    screen_h = int(ctypes.windll.user32.GetSystemMetrics(1))
+                else:
+                    screen_w, screen_h = pyautogui.size()
             except Exception:
                 screen_w, screen_h = pyautogui.size()
 
@@ -2907,7 +2901,8 @@ class ArtifactCard(QFrame):
         if not self._path or not Path(self._path).exists():
             return
         try:
-            os.startfile(self._path)
+            from core.platform_support import open_path
+            open_path(self._path)
         except Exception:
             pass
 
@@ -2915,10 +2910,8 @@ class ArtifactCard(QFrame):
         if not self._path or not Path(self._path).exists():
             return
         try:
-            if platform.system() == "Windows":
-                subprocess.Popen(["explorer", "/select,", self._path])
-            else:
-                os.startfile(str(Path(self._path).parent))
+            from core.platform_support import reveal_path
+            reveal_path(self._path)
         except Exception:
             pass
 
@@ -9931,6 +9924,9 @@ class MainWindow(QMainWindow):
         }
 
     def _startup_enabled(self) -> bool:
+        if platform.system() == "Linux":
+            from core.platform_support import autostart_enabled
+            return autostart_enabled()
         if platform.system() != "Windows":
             return False
         try:
@@ -9952,6 +9948,15 @@ class MainWindow(QMainWindow):
             return False
 
     def _set_startup_enabled(self, enabled: bool) -> bool:
+        if platform.system() == "Linux":
+            from core.platform_support import set_autostart
+            icon = BASE_DIR / "assets" / "brahma_evo_logo.png"
+            if not icon.exists():
+                icon = BASE_DIR / "assets" / "Brahma_Lite_Logo.png"
+            ok = set_autostart(enabled, _startup_run_value(), str(icon) if icon.exists() else None)
+            if not ok:
+                self._log.append_log("ERR: could not update ~/.config/autostart/brahma-evo.desktop")
+            return ok
         if platform.system() != "Windows":
             return False
         run_value = _startup_run_value()
@@ -9972,7 +9977,7 @@ class MainWindow(QMainWindow):
     def _refresh_startup_button(self):
         if not hasattr(self, "_startup_btn"):
             return
-        if platform.system() != "Windows":
+        if platform.system() not in ("Windows", "Linux"):
             self._startup_btn.setText("Start on Startup (Windows only)")
             self._startup_btn.setEnabled(False)
             return
@@ -9982,13 +9987,14 @@ class MainWindow(QMainWindow):
             self._startup_btn.setText("Start on Startup: OFF")
 
     def _toggle_startup(self):
-        if platform.system() != "Windows":
+        if platform.system() not in ("Windows", "Linux"):
             return
         enabled = not self._startup_enabled()
         if self._set_startup_enabled(enabled):
             self._refresh_startup_button()
             state = "enabled" if enabled else "disabled"
-            self._log.append_log(f"SYS: Windows startup {state}.")
+            where = "Windows startup" if platform.system() == "Windows" else "Linux autostart"
+            self._log.append_log(f"SYS: {where} {state}.")
 
     def _toggle_left_sidebar(self):
         self._left_collapsed = not self._left_collapsed
@@ -11758,13 +11764,15 @@ class SystemConnectivitySidebar(QFrame):
 
     def _open_data_folder(self):
         try:
-            os.startfile(str(CONFIG_DIR))
+            from core.platform_support import open_path
+            open_path(str(CONFIG_DIR))
         except Exception:
             pass
 
     def _view_logs(self):
         try:
-            os.startfile(str(BASE_DIR))
+            from core.platform_support import open_path
+            open_path(str(BASE_DIR))
         except Exception:
             pass
 
@@ -14116,13 +14124,15 @@ class SystemConnectivityPage(QWidget):
 
     def _open_data_folder(self):
         try:
-            os.startfile(str(CONFIG_DIR))
+            from core.platform_support import open_path
+            open_path(str(CONFIG_DIR))
         except Exception:
             pass
 
     def _view_logs(self):
         try:
-            os.startfile(str(BASE_DIR))
+            from core.platform_support import open_path
+            open_path(str(BASE_DIR))
         except Exception:
             pass
 
@@ -15653,6 +15663,8 @@ class _RootShim:
 
 class BrahmaUI:
     def __init__(self, face_path: str, size=None, *, show_immediately: bool = True):
+        from core.webengine_flags import prefer_pyqt_platform_plugins
+        prefer_pyqt_platform_plugins()
         self._app = QApplication.instance() or QApplication(sys.argv)
         self._app.setStyle("Fusion")
         self._app.setStyleSheet("""

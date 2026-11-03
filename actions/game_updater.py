@@ -5,27 +5,36 @@ import json
 import time
 import subprocess
 import threading
-import winreg
+try:
+    import winreg
+except ImportError:  # Linux and macOS have no registry module
+    winreg = None  # type: ignore[assignment]
 from pathlib import Path
 from datetime import datetime
 
 
 def _find_steam_path() -> Path | None:
-    registry_keys = [
-        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam"),
-        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Valve\Steam"),
-        (winreg.HKEY_CURRENT_USER,  r"SOFTWARE\Valve\Steam"),
-    ]
-    for hive, key_path in registry_keys:
-        try:
-            key = winreg.OpenKey(hive, key_path)
-            val, _ = winreg.QueryValueEx(key, "InstallPath")
-            winreg.CloseKey(key)
-            p = Path(val)
-            if p.exists() and (p / "steam.exe").exists():
-                return p
-        except Exception:
-            continue
+    if winreg is not None:
+        registry_keys = [
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Valve\Steam"),
+            (winreg.HKEY_CURRENT_USER,  r"SOFTWARE\Valve\Steam"),
+        ]
+        for hive, key_path in registry_keys:
+            try:
+                key = winreg.OpenKey(hive, key_path)
+                val, _ = winreg.QueryValueEx(key, "InstallPath")
+                winreg.CloseKey(key)
+                p = Path(val)
+                if p.exists() and (p / "steam.exe").exists():
+                    return p
+            except Exception:
+                continue
+    if sys.platform.startswith("linux"):
+        from core.platform_support import find_steam_linux
+        found = find_steam_linux()
+        if found is not None:
+            return found
     for p in [
         Path(os.environ.get("ProgramFiles(x86)", "")) / "Steam",
         Path(os.environ.get("ProgramFiles", "")) / "Steam",
@@ -36,7 +45,19 @@ def _find_steam_path() -> Path | None:
     return None
 
 
+_epic_linux_logged = False
+
+
 def _find_epic_path() -> Path | None:
+    global _epic_linux_logged
+    if winreg is None:
+        if not _epic_linux_logged:
+            _epic_linux_logged = True
+            print(
+                "[GameUpdater] Epic Games Launcher detection uses the Windows registry. "
+                "On Linux, install the launcher manually or use Heroic/Legendary; auto-detect is skipped."
+            )
+        return None
     registry_keys = [
         (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\EpicGames\EpicGamesLauncher"),
         (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\EpicGames\EpicGamesLauncher"),
@@ -102,6 +123,9 @@ def _get_steam_games(steam_path: Path) -> list[dict]:
 
 
 def _is_steam_running() -> bool:
+    if sys.platform.startswith("linux"):
+        from core.platform_support import process_running
+        return process_running(("steam",))
     try:
         out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq steam.exe"],
                              capture_output=True, text=True).stdout
@@ -111,6 +135,12 @@ def _is_steam_running() -> bool:
 
 
 def _get_steam_window_rect() -> tuple[int, int, int, int] | None:
+    if sys.platform.startswith("linux"):
+        from core.platform_support import window_geometry_by_title
+        rect = window_geometry_by_title("Steam")
+        if rect is None:
+            print("[GameUpdater] Steam window not found via xdotool. Install xdotool to click the profile picker.")
+        return rect
     try:
         import pygetwindow as gw
         for w in gw.getAllWindows():
@@ -686,6 +716,17 @@ def _update_epic_games(epic_path: Path, game_name: str = None) -> str:
 def _schedule_daily_update(hour: int = 3, minute: int = 0) -> str:
     task_name   = "BrahmaAI_GameUpdater"
     script_path = Path(__file__).resolve()
+    if sys.platform.startswith("linux"):
+        from core.platform_support import install_user_timer
+        when = datetime.now().replace(hour=hour, minute=minute, second=0, microsecond=0)
+        ok, msg = install_user_timer(
+            "brahma-game-updater",
+            when,
+            [sys.executable, str(script_path), "--scheduled"],
+            "Brahma AI daily game update",
+            on_calendar=f"*-*-* {hour:02d}:{minute:02d}:00",
+        )
+        return msg if ok else f"Scheduling failed: {msg}"
     subprocess.run(["schtasks", "/Delete", "/TN", task_name, "/F"], capture_output=True)
     for extra in (["/RL", "HIGHEST", "/RU", "SYSTEM"], []):
         cmd    = ["schtasks", "/Create", "/TN", task_name,
@@ -698,12 +739,23 @@ def _schedule_daily_update(hour: int = 3, minute: int = 0) -> str:
 
 
 def _cancel_scheduled_update() -> str:
+    if sys.platform.startswith("linux"):
+        from core.platform_support import remove_user_timer
+        return "Scheduled update cancelled." if remove_user_timer("brahma-game-updater") else "No scheduled update found."
     result = subprocess.run(["schtasks", "/Delete", "/TN", "BrahmaAI_GameUpdater", "/F"],
                             capture_output=True, text=True)
     return "Scheduled update cancelled." if result.returncode == 0 else "No scheduled update found."
 
 
 def _get_schedule_status() -> str:
+    if sys.platform.startswith("linux"):
+        unit = Path.home() / ".config" / "systemd" / "user" / "brahma-game-updater.timer"
+        config_home = os.environ.get("XDG_CONFIG_HOME", "").strip()
+        if config_home:
+            unit = Path(config_home) / "systemd" / "user" / "brahma-game-updater.timer"
+        if not unit.is_file():
+            return "No scheduled game update found."
+        return f"Game update scheduled. Timer file: {unit}"
     result = subprocess.run(["schtasks", "/Query", "/TN", "BrahmaAI_GameUpdater", "/FO", "LIST"],
                             capture_output=True, text=True)
     if result.returncode != 0:

@@ -31,6 +31,9 @@ def get_foreground_window_info() -> Dict[str, Any]:
     - rect: (x, y, w, h)
     """
     if not user32:
+        if sys.platform.startswith("linux"):
+            from core.platform_support import active_window
+            return active_window()
         return {"title": "", "class_name": "unknown", "hwnd": 0, "rect": (0, 0, 0, 0)}
 
     try:

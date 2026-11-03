@@ -6,11 +6,19 @@ import time
 import requests
 from PyQt6.QtCore import QObject, pyqtSignal
 
+from core.update_policy import github_repo_slug, linux_disabled_message, self_update_enabled
+
 class UpdateChecker(QObject):
     update_available_sig = pyqtSignal(str)
 
     def __init__(self, repo_owner="titechprabhasolutions", repo_name="Brahma---personal", branch="main"):
         super().__init__()
+        if sys.platform.startswith("linux"):
+            slug = github_repo_slug()
+            if slug and "/" in slug:
+                repo_owner, repo_name = slug.split("/", 1)
+            else:
+                repo_owner, repo_name = "", ""
         self.repo_owner = repo_owner
         self.repo_name = repo_name
         self.branch = branch
@@ -18,6 +26,17 @@ class UpdateChecker(QObject):
         self._check_thread = None
 
     def start(self):
+        if not self_update_enabled():
+            if sys.platform.startswith("linux"):
+                print(linux_disabled_message())
+            return
+        if sys.platform.startswith("linux") and not self.repo_owner:
+            print(
+                "[Updater] BRAHMA_ENABLE_UPDATE is set but BRAHMA_UPDATE_REPO is not. "
+                "Skipping GitHub commit checks against titechprabhasolutions/Brahma---personal. "
+                "A fast-forward of the current origin still runs from updater.py."
+            )
+            return
         if self._check_thread is None:
             self._check_thread = threading.Thread(target=self._check_loop, daemon=True, name="updater-thread")
             self._check_thread.start()

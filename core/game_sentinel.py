@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 from datetime import datetime
@@ -129,8 +130,11 @@ class GameSentinelManager:
 
     @staticmethod
     def get_active_power_scheme() -> Optional[str]:
-        """Queries Windows active power scheme GUID."""
+        """Queries Windows active power scheme GUID, or the Linux power profile name."""
         if os.name != "nt":
+            if sys.platform.startswith("linux"):
+                from core.platform_support import power_profile_get
+                return power_profile_get()
             return None
         try:
             out = subprocess.check_output(["powercfg", "/getactivescheme"], text=True, stderr=subprocess.DEVNULL)
@@ -161,8 +165,13 @@ class GameSentinelManager:
 
     @classmethod
     def set_power_scheme(cls, target_guid: str) -> bool:
-        """Sets active power scheme by GUID."""
-        if os.name != "nt" or not target_guid:
+        """Sets active power scheme by GUID, or a Linux power-profiles-daemon name."""
+        if not target_guid:
+            return False
+        if os.name != "nt":
+            if sys.platform.startswith("linux"):
+                from core.platform_support import power_profile_set
+                return power_profile_set(target_guid)
             return False
         try:
             res = subprocess.run(["powercfg", "/setactive", target_guid], check=True, capture_output=True)
@@ -174,6 +183,10 @@ class GameSentinelManager:
     @classmethod
     def activate_turbo_power_plan(cls) -> Optional[str]:
         """Finds and activates Ultimate Performance or High Performance scheme."""
+        if os.name != "nt":
+            if sys.platform.startswith("linux") and cls.set_power_scheme("performance"):
+                return "performance"
+            return None
         schemes = cls.list_available_power_schemes()
         target_guid = None
 

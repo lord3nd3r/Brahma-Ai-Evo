@@ -25,12 +25,12 @@ _APP_ALIASES = {
     "telegram":           {"Windows": "Telegram",               "Darwin": "Telegram",            "Linux": "telegram"},
     "instagram":          {"Windows": "Instagram",              "Darwin": "Instagram",           "Linux": "instagram"},
     "tiktok":             {"Windows": "TikTok",                 "Darwin": "TikTok",              "Linux": "tiktok"},
-    "notepad":            {"Windows": "notepad.exe",            "Darwin": "TextEdit",            "Linux": "gedit"},
+    "notepad":            {"Windows": "notepad.exe",            "Darwin": "TextEdit",            "Linux": "xed"},
     "calculator":         {"Windows": "calc.exe",               "Darwin": "Calculator",          "Linux": "gnome-calculator"},
-    "terminal":           {"Windows": "cmd.exe",                "Darwin": "Terminal",            "Linux": "gnome-terminal"},
+    "terminal":           {"Windows": "cmd.exe",                "Darwin": "Terminal",            "Linux": "x-terminal-emulator"},
     "cmd":                {"Windows": "cmd.exe",                "Darwin": "Terminal",            "Linux": "bash"},
-    "explorer":           {"Windows": "explorer.exe",           "Darwin": "Finder",              "Linux": "nautilus"},
-    "file explorer":      {"Windows": "explorer.exe",           "Darwin": "Finder",              "Linux": "nautilus"},
+    "explorer":           {"Windows": "explorer.exe",           "Darwin": "Finder",              "Linux": "nemo"},
+    "file explorer":      {"Windows": "explorer.exe",           "Darwin": "Finder",              "Linux": "nemo"},
     "paint":              {"Windows": "mspaint.exe",            "Darwin": "Preview",             "Linux": "gimp"},
     "word":               {"Windows": "winword",                "Darwin": "Microsoft Word",      "Linux": "libreoffice --writer"},
     "excel":              {"Windows": "excel",                  "Darwin": "Microsoft Excel",     "Linux": "libreoffice --calc"},
@@ -181,12 +181,31 @@ def _launch_macos(app_name: str) -> bool:
 
 
 
+_LINUX_FALLBACKS = {
+    "xed": ["xed", "gedit", "gnome-text-editor", "mousepad", "kate"],
+    "x-terminal-emulator": ["x-terminal-emulator", "gnome-terminal", "kgx", "konsole", "xfce4-terminal", "xterm"],
+    "gnome-terminal": ["x-terminal-emulator", "gnome-terminal", "konsole", "xterm"],
+    "nemo": ["nemo", "nautilus", "thunar", "dolphin", "pcmanfm"],
+    "nautilus": ["nemo", "nautilus", "thunar", "dolphin"],
+    "gnome-calculator": ["gnome-calculator", "galculator", "kcalc", "mate-calc"],
+    "google-chrome": ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "firefox"],
+    "gedit": ["xed", "gedit", "gnome-text-editor", "mousepad"],
+}
+
+
 def _launch_linux(app_name: str) -> bool:
-    binary = (
-        shutil.which(app_name) or
-        shutil.which(app_name.lower()) or
-        shutil.which(app_name.lower().replace(" ", "-"))
-    )
+    names = _LINUX_FALLBACKS.get(app_name.lower(), [app_name])
+    if app_name not in names:
+        names = [app_name, *names]
+    binary = None
+    for name in names:
+        binary = (
+            shutil.which(name) or
+            shutil.which(name.lower()) or
+            shutil.which(name.lower().replace(" ", "-"))
+        )
+        if binary:
+            break
     if binary:
         try:
             subprocess.Popen([binary], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

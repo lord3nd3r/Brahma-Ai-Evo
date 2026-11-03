@@ -106,7 +106,8 @@ def execute(**kwargs):
         fig.autofmt_xdate()
 
         # Create deliverables directory if it doesn't exist
-        deliverables_dir = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'BrahmaAI', 'deliverables')
+        from core.user_paths import deliverables_dir as _brahma_deliverables
+        deliverables_dir = str(_brahma_deliverables())
         os.makedirs(deliverables_dir, exist_ok=True)
 
         # Save the plot to a file

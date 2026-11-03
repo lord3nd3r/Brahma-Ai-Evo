@@ -21,6 +21,11 @@ def _get_app_data_dir() -> Path:
             p = Path(base) / "BrahmaAI" / "PlaywrightProfile"
             p.mkdir(parents=True, exist_ok=True)
             return p
+    if platform.system() == "Linux":
+        from core.user_paths import get_user_data_dir
+        p = get_user_data_dir() / "PlaywrightProfile"
+        p.mkdir(parents=True, exist_ok=True)
+        return p
     home = Path.home() / ".brahma_ai" / "playwright_profile"
     home.mkdir(parents=True, exist_ok=True)
     return home

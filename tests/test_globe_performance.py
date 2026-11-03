@@ -32,14 +32,25 @@ def test_globe_html_performance_optimizations():
     assert "translateZ(0)" in content
 
 def test_chromium_gpu_flags():
-    assert "QTWEBENGINE_CHROMIUM_FLAGS" in os.environ
-    flags = os.environ["QTWEBENGINE_CHROMIUM_FLAGS"]
+    from core.webengine_flags import WINDOWS_CHROMIUM_FLAGS, build_chromium_flags
+    import sys
+    flags = WINDOWS_CHROMIUM_FLAGS
     assert "--enable-gpu-rasterization" in flags
     assert "--enable-zero-copy" in flags
     assert "--ignore-gpu-blocklist" in flags
     assert "--disable-frame-rate-limit" in flags
     assert "--disable-gpu-vsync" in flags
     assert "--use-angle=d3d11" in flags
+    if sys.platform.startswith("linux"):
+        os.environ["BRAHMA_DISABLE_GPU"] = "1"
+        try:
+            safe = build_chromium_flags()
+            assert "--disable-gpu" in safe
+            assert "--ignore-gpu-blocklist" not in safe
+            assert "--enable-gpu-rasterization" not in safe
+            assert "--use-angle=d3d11" not in safe
+        finally:
+            os.environ.pop("BRAHMA_DISABLE_GPU", None)
 
 def test_globe_bridge_signals():
     bridge = GlobeBridge()

@@ -190,13 +190,14 @@ def run(parameters: dict, player=None, speak=None, session_memory=None) -> str:
         except Exception as e:
             logger.warning(f"Failed to copy to clipboard: {e}")
 
-    # Step 4: Reveal file in Windows Explorer
-    if video_file and video_file.exists() and sys.platform == "win32":
+    # Step 4: Reveal file in the file manager
+    if video_file and video_file.exists():
         try:
-            subprocess.Popen(["explorer.exe", f"/select,{str(video_file)}"])
-            _log(f"[Publisher] Highlighted {video_file.name} in Windows Explorer for drag & drop.")
+            from core.platform_support import reveal_path
+            if reveal_path(str(video_file)):
+                _log(f"[Publisher] Revealed {video_file.name} in the file manager for drag & drop.")
         except Exception as e:
-            logger.warning(f"Could not reveal file in explorer: {e}")
+            logger.warning(f"Could not reveal file in the file manager: {e}")
 
     # Step 5: Launch Creator Upload Portal
     upload_url = _PLATFORM_URLS.get(platform_name, _PLATFORM_URLS["tiktok"])

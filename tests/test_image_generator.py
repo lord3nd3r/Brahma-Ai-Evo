@@ -70,7 +70,7 @@ def test_generate_image_success():
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         with patch("urllib.request.urlopen", return_value=mock_resp), \
-             patch("os.startfile", return_value=None):
+             patch("core.platform_support.open_path", return_value=True):
 
             res = generate_image(
                 parameters={"prompt": "futuristic neon supercar", "style": "cyberpunk", "destination": tmp_dir},

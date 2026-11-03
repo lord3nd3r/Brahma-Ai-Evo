@@ -31,6 +31,9 @@ def parse_semver(ver: str) -> tuple:
 
 def check_for_updates() -> dict | None:
     """Checks the GitHub API for a new release. Returns release data if an update is available."""
+    if not sys.platform.startswith("win"):
+        print("[OTA] Windows installer updates (.exe) are disabled on this platform.")
+        return None
     try:
         url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
         req = urllib.request.Request(url, headers={'User-Agent': 'BrahmaEcho-OTA'})
@@ -63,6 +66,9 @@ def check_for_updates() -> dict | None:
 
 def download_and_apply_update(url: str, ui_callback=None):
     """Downloads the setup executable and triggers the silent installation."""
+    if not sys.platform.startswith("win"):
+        print("[OTA] Refusing to download and run a Windows installer on this platform.")
+        return
     try:
         from core.user_paths import get_user_data_dir
         update_dir = get_user_data_dir() / "updates"

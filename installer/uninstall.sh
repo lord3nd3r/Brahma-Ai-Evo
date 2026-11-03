@@ -32,7 +32,9 @@ if [ "$OS_TYPE" = "Darwin" ]; then
 else
     rm -f "$HOME/.local/share/applications/brahma-evo.desktop" 2>/dev/null || true
     rm -f "$HOME/.local/share/icons/hicolor/256x256/apps/brahma-evo.ico" 2>/dev/null || true
-    echo "Removed Linux desktop entry."
+    rm -f "$HOME/.local/share/icons/hicolor/256x256/apps/brahma-evo.png" 2>/dev/null || true
+    rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/autostart/brahma-evo.desktop" 2>/dev/null || true
+    echo "Removed Linux desktop entry and autostart launcher."
 fi
 
 # Remove CLI alias
@@ -40,13 +42,16 @@ rm -f "$HOME/.local/bin/brahma" 2>/dev/null || true
 
 # 3. Prompt for user data removal
 echo -e "${YELLOW}[3/4] User configuration options...${NC}"
-read -p "Do you also want to remove personal data, history, and models (~/BrahmaAI)? [y/N]: " REMOVE_DATA
+read -p "Do you also want to remove personal data, history, and models (XDG BrahmaAI dirs and ~/BrahmaAI)? [y/N]: " REMOVE_DATA
 if [[ "$REMOVE_DATA" =~ ^[Yy]$ ]]; then
     rm -rf "$HOME/BrahmaAI" 2>/dev/null || true
-    rm -rf "$HOME/.config/BrahmaAI" 2>/dev/null || true
+    rm -rf "${XDG_CONFIG_HOME:-$HOME/.config}/BrahmaAI" 2>/dev/null || true
+    rm -rf "${XDG_DATA_HOME:-$HOME/.local/share}/BrahmaAI" 2>/dev/null || true
+    rm -rf "${XDG_STATE_HOME:-$HOME/.local/state}/BrahmaAI" 2>/dev/null || true
+    rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/BrahmaAI" 2>/dev/null || true
     echo "Removed personal data and cache."
 else
-    echo "Preserved user data in ~/BrahmaAI."
+    echo "Preserved user data under the XDG BrahmaAI directories."
 fi
 
 # 4. Remove installation files

@@ -10,7 +10,11 @@ from pathlib import Path
 from datetime import datetime
 from urllib.parse import quote_plus
 
-import pyautogui
+try:
+    import pyautogui
+except Exception as exc:
+    pyautogui = None  # type: ignore[assignment]
+    print(f"[YouTube] pyautogui unavailable ({exc}). Install python3-tk for UI automation.")
 import numpy as np
 
 try:

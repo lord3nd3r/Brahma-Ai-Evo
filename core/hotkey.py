@@ -17,11 +17,12 @@ Zero new dependencies, best available mechanism per platform:
   needs the release too, and it needs to work while another application has
   focus. Polling two virtual-key codes 30 times a second is a rounding error of
   CPU and needs no message loop.
-* **macOS / Linux** — no portable way to read global key state without pulling
-  in a new package or asking for accessibility permissions, so the chord is
-  bound as an application shortcut instead: it works whenever the assistant's
-  window has focus. `scope` reports which of the two you got, so the UI can say
-  so honestly rather than pretending.
+* **Linux (X11)** — `XQueryKeymap` polled the same way, via libX11. This works
+  on Cinnamon/X11 without an extra Python package. Wayland sessions and a
+  missing display fall back to the window shortcut and say so in the log.
+* **macOS** — no portable way to read global key state without accessibility
+  permissions, so the chord is an application shortcut. `scope` reports which
+  you got.
 
 The class never raises. If the platform hook cannot be installed it simply
 reports `scope == "window"` and the Qt shortcut carries it.
@@ -82,6 +83,7 @@ class PushToTalk:
         self._stop = threading.Event()
         self._held = False
         self._scope = "window"
+        self._x11 = None
 
     # ── state ───────────────────────────────────────────────────────────────
 
@@ -109,8 +111,20 @@ class PushToTalk:
             self._thread = threading.Thread(
                 target=self._poll_loop, name="push-to-talk", daemon=True)
             self._thread.start()
+        elif _OS == "Linux" and self._open_x11():
+            self._scope = "global"
+            self._thread = threading.Thread(
+                target=self._poll_x11, name="push-to-talk", daemon=True)
+            self._thread.start()
+            print(f"[Hotkey] Global push-to-talk via X11 ({self.label}).")
         else:
             self._scope = "window"
+            if _OS == "Linux":
+                print(
+                    "[Hotkey] X11 global key poll is unavailable. "
+                    "Push-to-talk works while the Brahma window is focused "
+                    "(needs an X11 display and libX11)."
+                )
         return self._scope
 
     def stop(self) -> None:
@@ -118,6 +132,12 @@ class PushToTalk:
         t, self._thread = self._thread, None
         if t is not None and t.is_alive():
             t.join(timeout=1.0)
+        x11, self._x11 = self._x11, None
+        if x11 is not None:
+            try:
+                x11.close()
+            except Exception:
+                pass
         self._set_held(False)
 
     # ── the windowed fallback drives this directly ──────────────────────────
@@ -171,3 +191,100 @@ class PushToTalk:
 
         self._set_held(False)
         self._scope = "window"
+
+    def _open_x11(self) -> bool:
+        try:
+            self._x11 = _X11Keys(self._chord)
+            return True
+        except Exception as exc:
+            print(f"[Hotkey] X11 key poll failed: {exc}")
+            self._x11 = None
+            return False
+
+    def _poll_x11(self) -> None:
+        poller = self._x11
+        if poller is None:
+            self._scope = "window"
+            return
+        period = 1.0 / _POLL_HZ
+        down_since = 0.0
+        while not self._stop.is_set():
+            try:
+                down = poller.pressed()
+            except Exception:
+                break
+            now = time.monotonic()
+            if down:
+                if down_since == 0.0:
+                    down_since = now
+                elif now - down_since >= _DEBOUNCE_S:
+                    self._set_held(True)
+            else:
+                down_since = 0.0
+                self._set_held(False)
+            self._stop.wait(period)
+        self._set_held(False)
+        self._scope = "window"
+
+
+class _X11Keys:
+    """Poll an X11 keymap. One keycode group per chord token (left or right modifier)."""
+
+    _ALIASES = {
+        "ctrl": (b"Control_L", b"Control_R"),
+        "shift": (b"Shift_L", b"Shift_R"),
+        "alt": (b"Alt_L", b"Alt_R"),
+        "space": (b"space",),
+        "f8": (b"F8",),
+        "f9": (b"F9",),
+        "f10": (b"F10",),
+        "capslock": (b"Caps_Lock",),
+        "insert": (b"Insert",),
+    }
+
+    def __init__(self, chord):
+        import ctypes
+        self._ctypes = ctypes
+        self._lib = ctypes.cdll.LoadLibrary("libX11.so.6")
+        lib = self._lib
+        lib.XOpenDisplay.restype = ctypes.c_void_p
+        lib.XCloseDisplay.argtypes = [ctypes.c_void_p]
+        lib.XStringToKeysym.argtypes = [ctypes.c_char_p]
+        lib.XStringToKeysym.restype = ctypes.c_ulong
+        lib.XKeysymToKeycode.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        lib.XKeysymToKeycode.restype = ctypes.c_ubyte
+        lib.XQueryKeymap.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+        self._dpy = lib.XOpenDisplay(None)
+        if not self._dpy:
+            raise RuntimeError("XOpenDisplay returned no display")
+        self._groups: list[list[int]] = []
+        for token in chord:
+            names = self._ALIASES.get(token)
+            if not names:
+                raise RuntimeError(f"unsupported chord key {token}")
+            codes: list[int] = []
+            for name in names:
+                keysym = lib.XStringToKeysym(name)
+                if not keysym:
+                    continue
+                code = int(lib.XKeysymToKeycode(self._dpy, keysym))
+                if code:
+                    codes.append(code)
+            if not codes:
+                raise RuntimeError(f"no X11 keycode for {token}")
+            self._groups.append(codes)
+
+    def pressed(self) -> bool:
+        buf = self._ctypes.create_string_buffer(32)
+        self._lib.XQueryKeymap(self._dpy, buf)
+        raw = buf.raw
+
+        def _down(code: int) -> bool:
+            return bool(raw[code // 8] & (1 << (code % 8)))
+
+        return all(any(_down(code) for code in group) for group in self._groups)
+
+    def close(self) -> None:
+        if self._dpy:
+            self._lib.XCloseDisplay(self._dpy)
+            self._dpy = None

@@ -86,6 +86,12 @@ def bring_terminal_to_front(player: Any = None) -> None:
 
             WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
             user32.EnumWindows(WNDENUMPROC(enum_proc), 0)
+        elif sys.platform.startswith("linux"):
+            from core.platform_support import focus_window_by_title
+            if not focus_window_by_title("Brahma"):
+                focused = focus_window_by_title("Terminal") or focus_window_by_title("terminal")
+                if not focused:
+                    logger.info("[AutoHeal] Could not focus a terminal window. Install wmctrl or xdotool.")
     except Exception as exc:
         logger.debug(f"[AutoHeal] Could not foreground terminal: {exc}")
 

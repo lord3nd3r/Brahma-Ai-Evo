@@ -166,9 +166,10 @@ def generate_image(
         if player and hasattr(player, "write_log"):
             player.write_log(f"✅ [ImageGen] Image rendered successfully ({kb_size} KB in {elapsed}s).\nSaved to: {image_file}")
 
-        # Automatically open in Windows Photos
+        # Open with the platform default image viewer
         try:
-            os.startfile(str(image_file.resolve()))
+            from core.platform_support import open_path
+            open_path(str(image_file.resolve()))
         except Exception:
             pass
 

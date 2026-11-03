@@ -4,6 +4,54 @@ import subprocess
 import os
 import sys
 from datetime import datetime
+from pathlib import Path
+
+
+def _schedule_linux_reminder(target_dt: datetime, safe_message: str) -> str:
+    """One-shot systemd --user timer plus notify-send."""
+    from core.platform_support import install_user_timer
+    from core.user_paths import get_user_state_dir
+
+    stamp = target_dt.strftime("%Y%m%d_%H%M")
+    script_dir = get_user_state_dir() / "reminders"
+    script_dir.mkdir(parents=True, exist_ok=True)
+    script_path = script_dir / f"reminder_{stamp}.py"
+    script_path.write_text(
+        "\n".join([
+            "import shutil, subprocess, sys",
+            f"message = {safe_message!r}",
+            "title = 'Brahma Reminder'",
+            "if shutil.which('notify-send'):",
+            "    subprocess.run(['notify-send', '--app-name=Brahma Evo', title, message])",
+            "else:",
+            "    print('[Reminder] notify-send is not installed:', message, file=sys.stderr)",
+            "sound = '/usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga'",
+            "if shutil.which('paplay'):",
+            "    subprocess.run(['paplay', sound])",
+            "elif shutil.which('canberra-gtk-play'):",
+            "    subprocess.run(['canberra-gtk-play', '-i', 'dialog-information'])",
+            "elif shutil.which('espeak-ng'):",
+            "    subprocess.run(['espeak-ng', '-v', 'en+m3', message])",
+            "else:",
+            "    print('[Reminder] No sound player (paplay, canberra-gtk-play, or espeak-ng).', file=sys.stderr)",
+            "try:",
+            "    import os",
+            "    os.remove(__file__)",
+            "except Exception:",
+            "    pass",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    ok, detail = install_user_timer(
+        f"brahma-reminder-{stamp}",
+        target_dt,
+        [sys.executable, str(script_path)],
+        f"Brahma reminder: {safe_message}",
+    )
+    if not ok:
+        return f"I couldn't schedule the reminder. {detail}"
+    return f"Reminder set for {target_dt.strftime('%B %d at %I:%M %p')}."
 
 
 def reminder(
@@ -36,6 +84,13 @@ def reminder(
 
         if target_dt <= datetime.now():
             return "That time is already in the past."
+
+        safe_message = message.replace('"', '').replace("'", "").strip()[:200]
+        if sys.platform.startswith("linux"):
+            result_text = _schedule_linux_reminder(target_dt, safe_message)
+            if player and result_text.startswith("Reminder set"):
+                player.write_log(f"[reminder] set for {date_str} {time_str}")
+            return result_text
 
         task_name    = f"MARKReminder_{target_dt.strftime('%Y%m%d_%H%M')}"
         safe_message = message.replace('"', '').replace("'", "").strip()[:200]

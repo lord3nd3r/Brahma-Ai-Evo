@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+import sys
 import threading
 import time
 import urllib.request
@@ -110,6 +111,12 @@ def _boost_system_audio_for_call() -> Optional[float]:
     """
     orig_mic_level = None
 
+    if sys.platform.startswith("linux"):
+        from core.platform_support import linux_source_volume
+        current = linux_source_volume("get")
+        linux_source_volume("set", 100)
+        return (current / 100.0) if current is not None else None
+
     try:
         from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
         mic_dev = AudioUtilities.GetMicrophone()
@@ -127,6 +134,11 @@ def _boost_system_audio_for_call() -> Optional[float]:
 
 def _restore_system_audio_after_call(orig_mic_level: Optional[float]) -> None:
     """Restores the user's personal microphone level after the call proxy finishes."""
+    if sys.platform.startswith("linux"):
+        if orig_mic_level is not None:
+            from core.platform_support import linux_source_volume
+            linux_source_volume("set", int(max(0.0, min(1.0, orig_mic_level)) * 100))
+        return
     if orig_mic_level is not None:
         try:
             from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
@@ -270,15 +282,20 @@ class CallAssistant:
             return
 
         # Enforce Python session volume at 1.0 (un-ducked)
-        try:
-            from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume
-            for s in AudioUtilities.GetAllSessions():
-                if s.Process and s.Process.name() in ("python.exe", "pythonw.exe"):
-                    v = s._ctl.QueryInterface(ISimpleAudioVolume)
-                    v.SetMasterVolume(1.0, None)
-                    v.SetMute(0, None)
-        except Exception:
-            pass
+        if sys.platform.startswith("linux"):
+            from core.platform_support import set_linux_app_volume
+            if not set_linux_app_volume(("python", "python3"), 1.0):
+                logger.info("[CallAssistant] Per-app volume was not changed (no matching Pulse stream).")
+        else:
+            try:
+                from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume
+                for s in AudioUtilities.GetAllSessions():
+                    if s.Process and s.Process.name() in ("python.exe", "pythonw.exe"):
+                        v = s._ctl.QueryInterface(ISimpleAudioVolume)
+                        v.SetMasterVolume(1.0, None)
+                        v.SetMute(0, None)
+            except Exception:
+                pass
 
         # 1. Primary: Brahma Unified Native Voice (Gemini Live Charon)
         spoken = False
@@ -295,7 +312,10 @@ class CallAssistant:
             except Exception as e:
                 logger.warning(f"[CallAssistant] Unified voice playback notice: {e}")
 
-        # 2. Offline Fallback: Windows SAPI (instantaneous, 0ms latency)
+        # 2. Offline Fallback: Windows SAPI, or espeak-ng on Linux
+        if not spoken and sys.platform.startswith("linux"):
+            from core.platform_support import speak_offline
+            spoken = speak_offline(text)
         if not spoken:
             try:
                 import win32com.client

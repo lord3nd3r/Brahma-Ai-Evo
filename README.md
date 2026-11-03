@@ -11,6 +11,7 @@
 [![Gemini 2.5](https://img.shields.io/badge/Model-Gemini%202.5%20Flash%20Native%20Audio-orange?logo=google&logoColor=white)](https://ai.google.dev/)
 [![MCP](https://img.shields.io/badge/Protocol-Model%20Context%20Protocol-purple)](https://modelcontextprotocol.io/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D6?logo=windows&logoColor=white)](https://microsoft.com/windows)
+[![Platform](https://img.shields.io/badge/Platform-Ubuntu%20Linux-E95420?logo=ubuntu&logoColor=white)](https://ubuntu.com)
 
 </div>
 
@@ -133,6 +134,68 @@
 
 ---
 
+## Linux (Ubuntu 24.04+, Cinnamon / X11)
+
+Windows behavior is unchanged. On Linux the same tree runs with apt/pip dependencies (no snaps) and XDG paths.
+
+### Apt packages
+
+```bash
+sudo apt update
+sudo apt install -y \
+  python3 python3-venv python3-pip python3-tk \
+  libportaudio2 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 \
+  libxcb-image0 libxcb-render-util0 libxcb-randr0 libnss3 \
+  libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 \
+  libatk1.0-0 libcups2 libdrm2 libxshmfence1 libxkbcommon0 libxkbcommon-x11-0 \
+  libegl1 libgl1 libxss1 libasound2t64 \
+  xdotool wmctrl pulseaudio-utils espeak-ng mpv libnotify-bin \
+  playerctl
+```
+
+`libasound2t64` is the Ubuntu 24.04 name. On 22.04 use `libasound2` instead. `espeak-ng` is the offline voice; `mpv` plays Edge TTS audio; `playerctl` drives Spotify over MPRIS; `pulseaudio-utils` provides `pactl` (PipeWire includes it). Qt's xcb plugin also needs `libxcb-icccm4` and `libxcb-keysyms1`. OpenCV's wheel ships its own Qt plugins; on Linux Brahma points Qt back at PyQt6 so the window can open.
+
+### Run from a clone
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python main.py
+```
+
+### Menu launcher
+
+```bash
+bash installer/install.sh
+```
+
+That creates `~/.local/share/applications/brahma-evo.desktop` (PNG icon, not `.ico`) and a `brahma` command in `~/.local/bin`. Put `~/.local/bin` on `PATH` if it is not already.
+
+### Where files live
+
+| Kind | Linux | Windows (unchanged) |
+| :--- | :--- | :--- |
+| Config (API keys, settings) | `~/.config/BrahmaAI` | `%LOCALAPPDATA%\BrahmaAI\config` |
+| Data (memory, deliverables) | `~/.local/share/BrahmaAI` | `%LOCALAPPDATA%\BrahmaAI` |
+| Logs | `~/.local/state/BrahmaAI/startup.log` | `%LOCALAPPDATA%\Brahma Evo\startup.log` |
+
+`XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, and `XDG_CACHE_HOME` are honored.
+
+### Session integration
+
+- **Start on login** in Settings writes `~/.config/autostart/brahma-evo.desktop`.
+- **Reminders** use a systemd user timer plus `notify-send` (and `paplay` or `espeak-ng` for the chime).
+- **Lock** tries `cinnamon-screensaver-command --lock`, then `loginctl lock-session`.
+- **Global push-to-talk** (Ctrl+Space) uses X11 `XQueryKeymap`. On Wayland, or if libX11 cannot open the display, the chord works only while the Brahma window is focused. The log says which one you got.
+- **GPU:** if no DRM render node is present, or the display is Xvfb, Chromium is started with `--disable-gpu` so Qt WebEngine does not crash. A real GPU (including the Ryzen Vega) gets WebGL without `--ignore-gpu-blocklist`. Force the other way with `BRAHMA_FORCE_GPU=1` or `BRAHMA_DISABLE_GPU=1`. `BRAHMA_IGNORE_GPU_BLOCKLIST=1` opts into the blocklist bypass.
+
+### Self-update
+
+Linux does **not** fast-forward from `titechprabhasolutions/Brahma---personal`. That remote belongs to a different repository than this fork. Set `BRAHMA_ENABLE_UPDATE=1` to fast-forward the current `origin`, `BRAHMA_UPDATE_REMOTE` if origin is missing, and `BRAHMA_UPDATE_REPO=owner/name` for GitHub commit checks. `BRAHMA_SKIP_UPDATE=1` disables updates on every platform. The Windows `.exe` updater stays Windows-only.
+
+---
+
 ## 🎮 Voice & Command Cheat Sheet
 
 | Intent | Sample Voice / Text Command |
@@ -180,7 +243,7 @@ Brahma AI Evo/
 
 ## 🔒 Security & Privacy
 
-- All long-term memories, credentials, and configuration files are stored locally in `%LOCALAPPDATA%\BrahmaAI\`.
+- All long-term memories, credentials, and configuration files are stored locally in `%LOCALAPPDATA%\BrahmaAI\` on Windows and under the XDG BrahmaAI directories on Linux (`~/.config/BrahmaAI`, `~/.local/share/BrahmaAI`).
 - External tools run through permission sentries and the isolated Crucible sandbox.
 - Audio and video frames are only streamed during active conversation sessions.
 

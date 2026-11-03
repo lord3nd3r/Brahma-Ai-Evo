@@ -123,7 +123,8 @@ def execute(**kwargs):
         ax.grid(True, linestyle='--', alpha=0.3, color='#1E293B')
         ax.legend(facecolor='#0F172A', edgecolor='#334155', loc='upper right')
 
-        deliverables_dir = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'BrahmaAI', 'deliverables')
+        from core.user_paths import deliverables_dir as _brahma_deliverables
+        deliverables_dir = str(_brahma_deliverables())
         os.makedirs(deliverables_dir, exist_ok=True)
         image_path = os.path.join(deliverables_dir, 'flights_radar_output.png')
         plt.savefig(image_path, bbox_inches='tight', dpi=140)

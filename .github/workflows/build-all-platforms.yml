@@ -89,7 +89,7 @@ jobs:
 
   build-linux:
     name: Build Linux Portable Binary
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -102,7 +102,7 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-glx libegl1-mesa libxkbcommon-x11-0 libpulse0 libasound2-dev
+          sudo apt-get install -y libgl1 libegl1 libxkbcommon-x11-0 libpulse0 libasound2-dev libxcb-cursor0
 
       - name: Install Python Dependencies
         run: |

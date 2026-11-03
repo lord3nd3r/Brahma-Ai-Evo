@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import platform
+import sys
 import re
 import sqlite3
 import tempfile
@@ -18,7 +19,11 @@ from ctypes import wintypes
 import subprocess
 
 
-import pyautogui
+try:
+    import pyautogui
+except Exception as exc:  # python3-tk or a display may be missing
+    pyautogui = None  # type: ignore[assignment]
+    print(f"[AttentionMonitor] pyautogui unavailable ({exc}). Call-button clicks need python3-tk and X11.")
 
 try:
     import psutil
@@ -99,6 +104,9 @@ _WINDOW_CALL_HINTS = (
 
 
 def _db_path() -> Path:
+    if not sys.platform.startswith("win"):
+        print("[AttentionMonitor] Windows notification database is not available on this platform.")
+        return Path("/nonexistent") / "wpndatabase.db"
     local = os.environ.get("LOCALAPPDATA", "")
     return Path(local) / "Microsoft" / "Windows" / "Notifications" / "wpndatabase.db"
 
@@ -353,6 +361,10 @@ def _cleanup_current_audio() -> None:
 
 def _speak_sapi_male(text: str) -> None:
     """Speaks using an offline native Windows male voice (Microsoft George / David)."""
+    if not sys.platform.startswith("win"):
+        from core.platform_support import speak_offline
+        speak_offline(text)
+        return
     try:
         import win32com.client
         import pythoncom
@@ -449,6 +461,24 @@ def _speak_edge_native(text: str, force_edge: bool = False) -> None:
         player_alias = f"brahma_tts_{uuid.uuid4().hex[:8]}"
         _current_player_alias = player_alias
 
+        if not sys.platform.startswith("win"):
+            from core.platform_support import play_audio_file
+            played = play_audio_file(audio_path, wait=False)
+            if isinstance(played, subprocess.Popen):
+                _current_speech_proc = played
+                try:
+                    played.wait(timeout=180)
+                except Exception:
+                    pass
+                _current_speech_proc = None
+            else:
+                print("[AttentionMonitor] Linux audio playback failed. Falling back to offline speech.")
+                _cleanup_current_audio()
+                _speak_sapi_male(text)
+                return
+            _cleanup_current_audio()
+            return
+
         # Try fast, zero-latency native Windows MCI playback first
         played_via_mci = False
         try:
@@ -509,7 +539,12 @@ def stop_native_speech() -> None:
 
 
 def _focus_window_by_app(app: str) -> bool:
-    if Desktop is None:
+    if sys.platform.startswith("linux") or Desktop is None:
+        if sys.platform.startswith("linux"):
+            from core.platform_support import focus_window_by_title
+            if focus_window_by_title(app):
+                return True
+            print(f"[AttentionMonitor] Could not focus '{app}' (install wmctrl or xdotool).")
         return False
     try:
         desktop = Desktop(backend="uia")
@@ -571,7 +606,8 @@ def handle_call_action(event: dict, action: str) -> str:
             return f"Picked up the call on {event.get('app', 'the app')}."
         if _focus_window_by_app(app):
             try:
-                pyautogui.press("enter")
+                if pyautogui is not None:
+                    pyautogui.press("enter")
                 return f"Tried to pick up the call on {event.get('app', 'the app')}."
             except Exception:
                 pass
@@ -582,7 +618,8 @@ def handle_call_action(event: dict, action: str) -> str:
             return f"Declined the call on {event.get('app', 'the app')}."
         if _focus_window_by_app(app):
             try:
-                pyautogui.press("esc")
+                if pyautogui is not None:
+                    pyautogui.press("esc")
                 return f"Tried to decline the call on {event.get('app', 'the app')}."
             except Exception:
                 pass

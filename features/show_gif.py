@@ -27,7 +27,8 @@ def execute(**kwargs):
         query = query.get('query', 'laughing cat')
     query_clean = str(query).strip() or 'laughing cat'
 
-    output_dir = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'BrahmaAI', 'deliverables')
+    from core.user_paths import deliverables_dir as _brahma_deliverables
+    output_dir = str(_brahma_deliverables())
     os.makedirs(output_dir, exist_ok=True)
     gif_path = os.path.join(output_dir, 'show_gif_animation.gif')
 

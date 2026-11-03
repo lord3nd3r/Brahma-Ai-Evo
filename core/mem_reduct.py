@@ -59,6 +59,11 @@ class MemReductEngine:
             gc.collect()
             after_mem = psutil.virtual_memory()
             freed_bytes = max(0, after_mem.available - before_mem.available)
+            summary = (
+                f"Windows working-set purge is not available on this OS. "
+                f"Ran garbage collection only. Memory at {after_mem.percent}%."
+            )
+            logger.info(summary)
             return {
                 "success": True,
                 "freed_mb": round(freed_bytes / (1024 * 1024), 1),
@@ -66,7 +71,7 @@ class MemReductEngine:
                 "after_percent": after_mem.percent,
                 "trimmed_processes": 0,
                 "total_ram_gb": round(before_mem.total / (1024 ** 3), 1),
-                "summary": f"Garbage collection executed. Memory at {after_mem.percent}%."
+                "summary": summary,
             }
 
         kernel32 = ctypes.windll.kernel32

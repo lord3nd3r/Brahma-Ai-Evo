@@ -7,7 +7,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+from core.update_policy import git_remote_url, linux_disabled_message, self_update_enabled
 
+# Kept for callers that imported the historical Windows upstream URL.
 REMOTE = "https://github.com/titechprabhasolutions/Brahma---personal.git"
 BRANCH = "main"
 
@@ -25,7 +27,9 @@ def _run_git(base_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 def update_from_github(base_dir: Path) -> bool:
     """Update a clean Git checkout and return whether the app should restart."""
-    if os.environ.get("BRAHMA_SKIP_UPDATE") == "1":
+    if not self_update_enabled():
+        if sys.platform.startswith("linux"):
+            print(linux_disabled_message())
         return False
 
     if not (base_dir / ".git").exists():
@@ -37,7 +41,11 @@ def update_from_github(base_dir: Path) -> bool:
 
     remote = _run_git(base_dir, "remote", "get-url", "origin")
     if remote.returncode != 0 or not remote.stdout.strip():
-        _run_git(base_dir, "remote", "add", "origin", REMOTE)
+        url = git_remote_url()
+        if not url:
+            print("[Updater] No git origin and no BRAHMA_UPDATE_REMOTE; not adding an upstream.")
+            return False
+        _run_git(base_dir, "remote", "add", "origin", url)
 
     fetch = _run_git(base_dir, "fetch", "origin", BRANCH, "--quiet")
     if fetch.returncode != 0:

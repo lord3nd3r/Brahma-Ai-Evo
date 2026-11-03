@@ -103,7 +103,18 @@ def get_cpu_temp() -> Optional[float]:
                 return round((tz[0].CurrentTemperature / 10.0) - 273.15, 1)
         except Exception:
             pass
+    if platform.system() == "Linux":
+        global _cpu_temp_warned
+        if not _cpu_temp_warned:
+            _cpu_temp_warned = True
+            print(
+                "[Diagnostics] No CPU temperature sensor was readable. "
+                "On Linux this usually means k10temp/lm-sensors is not exposed under /sys/class/hwmon."
+            )
     return None
+
+
+_cpu_temp_warned = False
 
 
 def get_storage_status() -> List[Dict[str, Any]]:

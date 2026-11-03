@@ -133,25 +133,44 @@ else
     mkdir -p "$APPS_DIR"
     mkdir -p "$ICONS_DIR"
 
-    # Copy Icon
-    if [ -f "$INSTALL_DIR/assets/Brahma_Lite_Logo.ico" ]; then
-        cp "$INSTALL_DIR/assets/Brahma_Lite_Logo.ico" "$ICONS_DIR/brahma-evo.ico" 2>/dev/null || true
+    # Desktop environments (Cinnamon included) want a PNG icon, not a Windows .ico.
+    ICON_SRC=""
+    for candidate in \
+        "$INSTALL_DIR/assets/brahma_evo_logo.png" \
+        "$INSTALL_DIR/assets/Brahma_Lite_Logo.png"
+    do
+        if [ -f "$candidate" ]; then
+            ICON_SRC="$candidate"
+            break
+        fi
+    done
+    if [ -n "$ICON_SRC" ]; then
+        cp "$ICON_SRC" "$ICONS_DIR/brahma-evo.png"
+        if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+            gtk-update-icon-cache -f "$HOME/.local/share/icons/hicolor" >/dev/null 2>&1 || true
+        fi
     fi
 
-    # Create .desktop file
+    # Create .desktop file. Paths are quoted so spaces in the home directory work.
     cat <<EOF > "$APPS_DIR/brahma-evo.desktop"
 [Desktop Entry]
 Type=Application
+Version=1.0
 Name=Brahma Evo
 Comment=Autonomous AI Desktop Assistant
-Exec=$INSTALL_DIR/venv/bin/python $INSTALL_DIR/main.py
-Icon=$ICONS_DIR/brahma-evo.ico
+Exec="$INSTALL_DIR/venv/bin/python" "$INSTALL_DIR/main.py"
+Icon=$ICONS_DIR/brahma-evo.png
 Terminal=false
-Categories=Utility;AudioVideo;Development;
+Categories=Utility;AudioVideo;
 StartupNotify=true
 EOF
     chmod +x "$APPS_DIR/brahma-evo.desktop"
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database "$APPS_DIR" >/dev/null 2>&1 || true
+    fi
     echo -e "${GREEN}✓ Created Linux desktop entry: $APPS_DIR/brahma-evo.desktop${NC}"
+    echo -e "Recommended apt packages (no snaps):"
+    echo -e "  ${CYAN}sudo apt install python3-tk libportaudio2 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 xdotool wmctrl pulseaudio-utils espeak-ng mpv libnotify-bin${NC}"
 fi
 
 # 5. CLI Global Command

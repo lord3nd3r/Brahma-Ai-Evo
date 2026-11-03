@@ -17,19 +17,11 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# Configure cross-platform Chromium flags before WebEngine imports
-CHROMIUM_FLAGS = [
-    "--enable-gpu-rasterization",
-    "--enable-zero-copy",
-    "--ignore-gpu-blocklist",
-    "--enable-webgl",
-]
-if sys.platform == "win32":
-    CHROMIUM_FLAGS.append("--use-angle=d3d11")
-elif sys.platform.startswith("linux"):
-    CHROMIUM_FLAGS.extend(["--no-sandbox", "--disable-dev-shm-usage"])
+# Configure cross-platform Chromium flags before WebEngine imports.
+# Linux omits --ignore-gpu-blocklist unless a GPU is actually usable.
+from core.webengine_flags import apply_webengine_flags
 
-os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = " ".join(CHROMIUM_FLAGS)
+CHROMIUM_FLAGS = apply_webengine_flags().split()
 
 try:
     from PyQt6.QtCore import QObject, Qt, QUrl, pyqtSignal as Signal, pyqtSlot as Slot

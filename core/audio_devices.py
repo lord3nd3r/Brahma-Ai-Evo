@@ -25,6 +25,7 @@ WHY THIS IS CACHED
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
 
@@ -250,8 +251,51 @@ _PSEUDO_DEVICES = (
 )
 
 
-def _is_pseudo(name: str) -> bool:
-    low = name.lower()
+def linux_device_score(name: str, api_name: str = "") -> int:
+    """Higher is a better Linux endpoint. Pulse and PipeWire outrank raw ALSA hw.
+
+    PortAudio on PipeWire often exposes a single ALSA host API whose PCM names
+    are ``pulse``, ``pipewire``, or ``default``. Those must sort ahead of
+    ``hw:`` / HDMI devices, and ahead of any MME/WASAPI-style labels.
+    """
+    n = (name or "").lower().strip()
+    api = (api_name or "").lower()
+    score = 0
+    if "pipewire" in api:
+        score += 300
+    elif "pulse" in api:
+        score += 280
+    elif "jack" in api:
+        score += 200
+    elif "alsa" in api:
+        score += 40
+    if "pipewire" in n:
+        score += 150
+    elif n == "pulse" or n.startswith("pulse"):
+        score += 140
+    elif n == "default":
+        score += 80
+    if "monitor" in n:
+        score -= 80
+    if n.startswith("hw:") or "plughw" in n:
+        score -= 60
+    if "hdmi" in n:
+        score -= 30
+    if any(tok in n or tok in api for tok in ("mme", "wasapi", "directsound")):
+        score -= 100
+    return score
+
+
+def _is_pseudo(name: str, api_name: str = "") -> bool:
+    low = name.lower().strip()
+    api = (api_name or "").lower()
+    # Pulse/PipeWire's own "default" sink is the device people mean. ALSA's
+    # "default" PCM is also the plugin that routes into PipeWire, so keep the
+    # exact name and let ranking decide. "sysdefault" still matches below.
+    if sys.platform.startswith("linux") and low in {"default", "pulse", "pipewire"}:
+        return False
+    if ("pulse" in api or "pipewire" in api) and low == "default":
+        return False
     return any(tok in low for tok in _PSEUDO_DEVICES)
 
 
@@ -279,18 +323,25 @@ def _query() -> dict[str, list[str]]:
             found, seen = [], set()
             for idx, dev in enumerate(devices):
                 name = (dev.get("name") or "").strip()
-                if not name or _is_pseudo(name) or name in seen:
+                api = apis[dev["hostapi"]] if dev.get("hostapi", -1) < len(apis) else ""
+                if not name or _is_pseudo(name, api) or name in seen:
                     continue
                 if dev.get(chan, 0) <= 0:
                     continue
                 if api_filter is not None:
-                    api = apis[dev["hostapi"]].lower() if dev.get("hostapi", -1) < len(apis) else ""
-                    if api_filter not in api:
+                    if api_filter not in api.lower():
                         continue
                 if not _usable(idx, kind):
                     continue
                 seen.add(name)
                 found.append((idx, name))
+            if sys.platform.startswith("linux") and found:
+                def _score(item: tuple[int, str]) -> int:
+                    idx, dev_name = item
+                    dev = devices[idx]
+                    api_name = apis[dev["hostapi"]] if dev.get("hostapi", -1) < len(apis) else ""
+                    return linux_device_score(dev_name, api_name)
+                found.sort(key=_score, reverse=True)
             return found
 
         # Each direction picks its own host API. They are genuinely different

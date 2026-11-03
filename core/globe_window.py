@@ -11,17 +11,9 @@ from typing import Optional, Dict, Any, List
 
 import sys
 
-# Hardware acceleration & WebGL flags for smooth 180fps+ rendering across Windows, macOS, and Linux
-_base_chromium_flags = (
-    "--enable-gpu-rasterization --enable-zero-copy --ignore-gpu-blocklist "
-    "--enable-accelerated-2d-canvas --enable-webgl --enable-webgl2-compute-context "
-    "--disable-frame-rate-limit --disable-gpu-vsync --num-raster-threads=4 --disable-gpu-driver-bug-workarounds"
-)
-if sys.platform == "win32":
-    _base_chromium_flags += " --use-angle=d3d11"
-elif sys.platform.startswith("linux"):
-    _base_chromium_flags += " --no-sandbox --disable-dev-shm-usage"
-os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", _base_chromium_flags)
+from core.webengine_flags import apply_webengine_flags
+
+apply_webengine_flags()
 
 from PyQt6.QtCore import Qt, QUrl, pyqtSlot, QObject, pyqtSignal, QTimer, QPoint, QCoreApplication
 from PyQt6.QtWidgets import (

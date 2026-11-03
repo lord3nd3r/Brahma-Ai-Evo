@@ -106,6 +106,10 @@ def _open_url_in_chrome(url: str) -> bool:
 
 def _press_media_key(key_name: str) -> bool:
     """Sends hardware virtual media key codes."""
+    if sys.platform.startswith("linux"):
+        from core.platform_support import linux_media_key
+        if linux_media_key(key_name):
+            return True
     try:
         import ctypes
         VK_MEDIA_NEXT_TRACK = 0xB0
@@ -269,10 +273,11 @@ def spotify_controller(
         # If Desktop Spotify App exists, launch it
         if spotify_app:
             try:
-                os.startfile(f"spotify:search:{encoded}")
-                time.sleep(1.2)
-                _press_media_key("playpause")
-                return f"Playing '{query}' on Spotify."
+                from core.platform_support import open_path
+                if open_path(f"spotify:search:{encoded}"):
+                    time.sleep(1.2)
+                    _press_media_key("playpause")
+                    return f"Playing '{query}' on Spotify."
             except Exception:
                 pass
 

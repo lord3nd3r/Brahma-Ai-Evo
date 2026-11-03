@@ -30,6 +30,10 @@ class LASTINPUTINFO(ctypes.Structure):
 def get_idle_time_seconds() -> float:
     """Returns the number of seconds since the user last touched mouse or keyboard."""
     if not user32 or not kernel32:
+        if sys.platform.startswith("linux"):
+            from core.platform_support import idle_seconds
+            value = idle_seconds()
+            return 0.0 if value is None else value
         return 0.0
     lii = LASTINPUTINFO()
     lii.cbSize = ctypes.sizeof(LASTINPUTINFO)

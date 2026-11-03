@@ -86,6 +86,15 @@ def _restore_from_trash(original: Path) -> str:
                         return f"'{original.name}' restored from the Recycle Bin."
         except Exception as e:
             print(f"[file] Recycle Bin restore failed: {e}")
+    elif _OS == "Linux":
+        from core.platform_support import restore_from_trash
+        restored = restore_from_trash(original)
+        if restored:
+            return restored
+        return (
+            f"'{original.name}' is in the Trash (~/.local/share/Trash). "
+            "I could not match it back to the original path automatically."
+        )
     return (f"'{original.name}' is in the Recycle Bin — I could not pull it back "
             f"automatically, but it is there and can be restored by hand.")
 

@@ -261,8 +261,8 @@ Skill Architecture Guidelines:
 5. Visual Deliverables, Images, GIFs, & UI Cards:
    - If the user asks for images, drawings, graphics, headphones, cars, animals, cartoons, plots, scorecards, charts, or GIFs:
      a) ALWAYS produce an actual deliverable image file (.png or .gif) saved to:
-        `output_dir = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'BrahmaAI', 'deliverables')`
-        `os.makedirs(output_dir, exist_ok=True)`
+        `from core.user_paths import deliverables_dir`
+        `output_dir = str(deliverables_dir())`
         `image_path = os.path.join(output_dir, f'{actual_name}_output.png')`
      b) For diagrams, illustrations, charts, or tech visuals: Generate the visual NATIVELY using `PIL` (`from PIL import Image, ImageDraw, ImageFont`) or `matplotlib` (`import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot as plt`).
         Style it with a sleek cyberpunk dark theme: dark slate background `#0B0F19` or `#030712`, glowing cyan `#00F0FF`, ice cyan `#38BDF8`, emerald `#10B981`, and white `#FFFFFF`.

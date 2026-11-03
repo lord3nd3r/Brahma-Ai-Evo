@@ -76,7 +76,8 @@ def execute(**kwargs):
         ax.set_title("International Space Station Live Position", color='white', fontsize=16)
 
         # Create output directory if it doesn't exist
-        output_dir = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'BrahmaAI', 'deliverables')
+        from core.user_paths import deliverables_dir as _brahma_deliverables
+        output_dir = str(_brahma_deliverables())
         os.makedirs(output_dir, exist_ok=True)
         image_path = os.path.join(output_dir, 'tracks_international_space_station_output.png')
 

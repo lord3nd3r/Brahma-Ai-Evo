@@ -284,51 +284,28 @@ def _ensure_network_access(port: int) -> None:
         return
 
     # ── Linux ─────────────────────────────────────────────────────────────────
-    def _privileged(cmd: list[str]) -> bool:
-        for prefix in (["pkexec"], ["sudo", "-n"]):
-            try:
-                r = _quiet_run(prefix + cmd, capture_output=True, timeout=30)
-                if r.returncode == 0:
-                    return True
-            except Exception:
-                pass
-        return False
+    # Do not change ufw, firewalld, or iptables from the app. Ubuntu desktop
+    # installs are usually not firewalled for outbound LAN, and prompting for
+    # a root password on every launch is the wrong default.
+    print(
+        f"[Dashboard] Linux: not modifying the firewall. "
+        f"Phone connections use TCP {port} on this machine. "
+        f"If a firewall blocks it, allow that port yourself."
+    )
+    return
 
-    try:  # ufw
-        r = _quiet_run(["ufw", "status"], capture_output=True, text=True, timeout=5)
-        if "active" in r.stdout.lower():
-            if _privileged(["ufw", "allow", f"{port}/tcp"]):
-                print(f"[Dashboard] ufw: port {port} allowed.")
-            else:
-                print(f"[Dashboard] Run manually:  sudo ufw allow {port}/tcp")
-            return
-    except FileNotFoundError:
-        pass
 
-    try:  # firewalld
-        r = _quiet_run(
-            ["firewall-cmd", "--state"], capture_output=True, text=True, timeout=5,
-        )
-        if "running" in r.stdout.lower():
-            ok = (_privileged(["firewall-cmd", "--add-port", f"{port}/tcp", "--permanent"])
-                  and _privileged(["firewall-cmd", "--reload"]))
-            if ok:
-                print(f"[Dashboard] firewalld: port {port} allowed.")
-            else:
-                print(f"[Dashboard] Run manually:  sudo firewall-cmd --add-port={port}/tcp --permanent && sudo firewall-cmd --reload")
-            return
-    except FileNotFoundError:
-        pass
-
-    try:  # iptables (not persistent but works until reboot)
-        r = _quiet_run(["iptables", "-L", "INPUT", "-n"], capture_output=True, timeout=5)
-        if r.returncode == 0:
-            if _privileged(["iptables", "-A", "INPUT", "-p", "tcp", "--dport", str(port), "-j", "ACCEPT"]):
-                print(f"[Dashboard] iptables: port {port} opened.")
-            else:
-                print(f"[Dashboard] Run manually:  sudo iptables -A INPUT -p tcp --dport {port} -j ACCEPT")
-    except FileNotFoundError:
-        pass  # no iptables means firewall is probably off — nothing to do
+def _lock_workstation() -> None:
+    """Lock the desktop. Windows uses LockWorkStation; Linux uses the session tools."""
+    if sys.platform == "win32":
+        import ctypes
+        ctypes.windll.user32.LockWorkStation()
+        return
+    if sys.platform.startswith("linux"):
+        from core.platform_support import lock_session
+        lock_session()
+        return
+    print("[Dashboard] Session lock is not implemented on this platform.")
 
 
 def _ensure_crypto_js() -> None:
@@ -867,10 +844,13 @@ class DashboardServer:
                         pyautogui.press("volumemute")
                 elif act_type == "system":
                     if action == "lock":
-                        import ctypes
-                        ctypes.windll.user32.LockWorkStation()
+                        _lock_workstation()
                     elif action == "desktop":
-                        pyautogui.hotkey("win", "d")
+                        if sys.platform.startswith("linux"):
+                            from core.platform_support import show_desktop
+                            show_desktop()
+                        else:
+                            pyautogui.hotkey("win", "d")
                     elif action == "screenshot":
                         pyautogui.hotkey("win", "printscreen")
                     elif action == "browser":
@@ -1144,10 +1124,13 @@ class DashboardServer:
                         try:
                             import pyautogui
                             if action == "lock":
-                                import ctypes
-                                ctypes.windll.user32.LockWorkStation()
+                                _lock_workstation()
                             elif action == "desktop":
-                                pyautogui.hotkey("win", "d")
+                                if sys.platform.startswith("linux"):
+                                    from core.platform_support import show_desktop
+                                    show_desktop()
+                                else:
+                                    pyautogui.hotkey("win", "d")
                             elif action == "screenshot":
                                 pyautogui.hotkey("win", "printscreen")
                             elif action == "browser":

@@ -1,12 +1,11 @@
-from core.user_paths import get_user_data_dir
-from typing import Any, Optional
 import os
+import sys
+from core.webengine_flags import apply_webengine_flags
 
-# Hardware acceleration & WebGL flags for smooth 180fps+ rendering in Chromium
-os.environ.setdefault(
-    "QTWEBENGINE_CHROMIUM_FLAGS",
-    "--enable-gpu-rasterization --enable-zero-copy --ignore-gpu-blocklist --enable-accelerated-2d-canvas --enable-webgl --enable-webgl2-compute-context --disable-frame-rate-limit --disable-gpu-vsync --num-raster-threads=4 --use-angle=d3d11 --disable-gpu-driver-bug-workarounds"
-)
+apply_webengine_flags()
+
+from core.user_paths import get_user_data_dir, startup_log_path
+from typing import Any, Optional
 
 try:
     from PyQt6.QtCore import QCoreApplication, Qt
@@ -121,7 +120,7 @@ def get_base_dir():
 BASE_DIR        = get_base_dir()
 API_CONFIG_PATH = get_user_data_dir() / "config" / "api_keys.json"
 PROMPT_PATH     = BASE_DIR / "core" / "prompt.txt"
-STARTUP_LOG     = Path(os.environ.get("LOCALAPPDATA", str(BASE_DIR))) / "Brahma Evo" / "startup.log"
+STARTUP_LOG     = startup_log_path(BASE_DIR)
 LIVE_MODEL          = "models/gemini-2.5-flash-native-audio-latest"
 CHANNELS            = 1
 SEND_SAMPLE_RATE    = 16000

@@ -73,6 +73,9 @@ class ProtocolEngine:
         if user32:
             WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_int)
             user32.EnumWindows(WNDENUMPROC(enum_windows_callback), 0)
+        elif sys.platform.startswith("linux"):
+            from core.platform_support import minimize_windows_matching
+            minimized_count = minimize_windows_matching(distractions)
 
         return f"Protocol Deep Work engaged. Persona switched to minimal. {minimized_count} distraction windows minimized."
 
@@ -83,8 +86,12 @@ class ProtocolEngine:
         """
         # Set Windows Power Plan to High Performance if on Windows
         try:
-            # GUID for High Performance: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
-            subprocess.run(["powercfg", "/setactive", "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"], capture_output=True)
+            if sys.platform == "win32":
+                # GUID for High Performance: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+                subprocess.run(["powercfg", "/setactive", "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"], capture_output=True)
+            elif sys.platform.startswith("linux"):
+                from core.platform_support import power_profile_set
+                power_profile_set("performance")
         except Exception:
             pass
 
@@ -98,6 +105,11 @@ class ProtocolEngine:
             pass
 
         ram_after = psutil.virtual_memory().percent
+        if sys.platform.startswith("linux"):
+            return (
+                f"Protocol Redline active. Requested the performance power profile. "
+                f"Windows working-set purge was skipped. RAM load at {ram_after}%."
+            )
         return f"Protocol Redline active. Power plan set to High Performance. RAM load at {ram_after}%."
 
     # ── PROTOCOL: LOCKDOWN (GHOST PRIVACY) ───────────────────────────────
@@ -115,7 +127,14 @@ class ProtocolEngine:
             # Lock the workstation
             user32.LockWorkStation()
             return "Protocol Lockdown triggered. Workstation locked and master audio muted."
-        
+
+        if sys.platform.startswith("linux"):
+            from core.platform_support import linux_volume, lock_session
+            linux_volume("mute")
+            if lock_session():
+                return "Protocol Lockdown triggered. Session locked and master audio muted."
+            return "Protocol Lockdown muted audio, but the session could not be locked."
+
         return "Lockdown failed: Non-windows environment."
 
     # ── PROTOCOL: NIGHTFALL (WRAP UP DAY) ────────────────────────────────

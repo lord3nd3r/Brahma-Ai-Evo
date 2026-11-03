@@ -88,9 +88,8 @@ def execute(**kwargs):
         for spine in ax.spines.values():
             spine.set_color('#1E293B')
 
-        local_app_data = os.environ.get('LOCALAPPDATA', os.path.expanduser('~'))
-        output_dir = os.path.join(local_app_data, 'BrahmaAI', 'deliverables')
-        os.makedirs(output_dir, exist_ok=True)
+        from core.user_paths import deliverables_dir as _brahma_deliverables
+        output_dir = str(_brahma_deliverables())
         image_path = os.path.join(output_dir, 'cricket_scores_output.png')
         plt.savefig(image_path, bbox_inches='tight', dpi=140)
         plt.close(fig)

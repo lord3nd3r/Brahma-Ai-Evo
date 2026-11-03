@@ -1,6 +1,7 @@
 #computer_settings.py
 import json
 import re
+import shutil
 import sys
 import time
 import subprocess
@@ -66,8 +67,8 @@ def volume_up():
             "set volume output volume (output volume of (get volume settings) + 10)"],
             capture_output=True)
     else:
-        subprocess.run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", "+10%"],
-            capture_output=True)
+        from core.platform_support import linux_volume
+        linux_volume("up")
 
 def volume_down():
     if _OS == "Windows":
@@ -77,8 +78,8 @@ def volume_down():
             "set volume output volume (output volume of (get volume settings) - 10)"],
             capture_output=True)
     else:
-        subprocess.run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", "-10%"],
-            capture_output=True)
+        from core.platform_support import linux_volume
+        linux_volume("down")
 
 def volume_mute():
     if _OS == "Windows":
@@ -87,8 +88,8 @@ def volume_mute():
         subprocess.run(["osascript", "-e", "set volume with output muted"],
             capture_output=True)
     else:
-        subprocess.run(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"],
-            capture_output=True)
+        from core.platform_support import linux_volume
+        linux_volume("mute")
 
 def volume_get() -> int | None:
     """Current master volume 0-100, or None if this platform will not say.
@@ -113,10 +114,8 @@ def volume_get() -> int | None:
             r = subprocess.run(["osascript", "-e", "output volume of (get volume settings)"],
                                capture_output=True, text=True, timeout=5)
             return max(0, min(100, int(r.stdout.strip())))
-        r = subprocess.run(["pactl", "get-sink-volume", "@DEFAULT_SINK@"],
-                           capture_output=True, text=True, timeout=5)
-        m = re.search(r"(\d+)%", r.stdout)
-        return max(0, min(100, int(m.group(1)))) if m else None
+        from core.platform_support import linux_volume
+        return linux_volume("get")
     except Exception:
         return None
 
@@ -182,8 +181,8 @@ def volume_set(value: int):
             capture_output=True)
         return
     else:
-        subprocess.run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{value}%"],
-            capture_output=True)
+        from core.platform_support import linux_volume
+        linux_volume("set", value)
         return
 
 def brightness_up():
@@ -257,8 +256,20 @@ def full_screen():
     else:               pyautogui.press("f11")
 
 def minimize_window():
-    if _OS == "Darwin": pyautogui.hotkey("command", "m")
-    else:               pyautogui.hotkey("win", "down")
+    if _OS == "Darwin":
+        pyautogui.hotkey("command", "m")
+    elif _OS == "Linux":
+        if shutil.which("xdotool"):
+            wid = subprocess.run(["xdotool", "getactivewindow"], capture_output=True, text=True)
+            if wid.returncode == 0 and wid.stdout.strip():
+                subprocess.run(["xdotool", "windowminimize", wid.stdout.strip()], capture_output=True)
+                return
+        if shutil.which("wmctrl"):
+            subprocess.run(["wmctrl", "-r", ":ACTIVE:", "-b", "add,hidden"], capture_output=True)
+            return
+        print("[Settings] Cannot minimize the active window. Install xdotool or wmctrl.")
+    else:
+        pyautogui.hotkey("win", "down")
 
 def maximize_window():
     if _OS == "Darwin":
@@ -313,9 +324,14 @@ def switch_window():
     else:               pyautogui.hotkey("alt", "tab")
 
 def show_desktop():
-    if _OS == "Darwin":   pyautogui.hotkey("fn", "f11")
-    elif _OS == "Windows": pyautogui.hotkey("win", "d")
-    else:                  pyautogui.hotkey("super", "d")
+    if _OS == "Darwin":
+        pyautogui.hotkey("fn", "f11")
+    elif _OS == "Windows":
+        pyautogui.hotkey("win", "d")
+    else:
+        from core.platform_support import show_desktop as _show_desktop
+        if not _show_desktop():
+            pyautogui.hotkey("super", "d")
 
 def open_task_manager():
     if _OS == "Windows":
@@ -463,14 +479,8 @@ def lock_screen():
     elif _OS == "Darwin":
         subprocess.run(["pmset", "displaysleepnow"], capture_output=True)
     else:
-        for cmd in [
-            ["gnome-screensaver-command", "-l"],
-            ["xdg-screensaver", "lock"],
-            ["loginctl", "lock-session"],
-        ]:
-            if subprocess.run(["which", cmd[0]], capture_output=True).returncode == 0:
-                subprocess.run(cmd, capture_output=True)
-                return
+        from core.platform_support import lock_session
+        lock_session()
 
 def open_system_settings():
     if _OS == "Windows":
@@ -489,7 +499,7 @@ def open_file_explorer():
     elif _OS == "Darwin":
         subprocess.Popen(["open", str(Path.home())])
     else:
-        for cmd in [["nautilus"], ["thunar"], ["dolphin"], ["nemo"]]:
+        for cmd in [["nemo"], ["nautilus"], ["thunar"], ["dolphin"]]:
             if subprocess.run(["which", cmd[0]], capture_output=True).returncode == 0:
                 subprocess.Popen(cmd)
                 return
@@ -530,6 +540,19 @@ def dark_mode():
             print(f"[Settings] dark_mode registry failed: {e}")
     else:
         try:
+            cinnamon = subprocess.run(
+                ["gsettings", "get", "org.cinnamon.desktop.interface", "gtk-theme"],
+                capture_output=True, text=True,
+            )
+            if cinnamon.returncode == 0 and cinnamon.stdout.strip():
+                theme = cinnamon.stdout.strip().strip("'\"")
+                new_theme = theme[:-5] if theme.endswith("-Dark") else theme + "-Dark"
+                subprocess.run(
+                    ["gsettings", "set", "org.cinnamon.desktop.interface", "gtk-theme", new_theme],
+                    capture_output=True,
+                )
+                print(f"[Settings] Cinnamon gtk-theme set to {new_theme}.")
+                return
             result = subprocess.run(
                 ["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"],
                 capture_output=True, text=True

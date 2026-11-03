@@ -14,6 +14,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 import urllib.parse
@@ -419,6 +420,20 @@ class FlowStateManager:
         }
 
     def _find_browser_exe(self, binary_name: str) -> Optional[str]:
+        if sys.platform.startswith("linux"):
+            import shutil
+            for name in (
+                binary_name,
+                "google-chrome",
+                "google-chrome-stable",
+                "chromium",
+                "chromium-browser",
+                "firefox",
+                "microsoft-edge",
+            ):
+                found = shutil.which(name)
+                if found:
+                    return found
         candidates = [
             Path(os.environ.get("PROGRAMFILES", "C:\\Program Files")) / "Google" / "Chrome" / "Application" / binary_name,
             Path(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)")) / "Google" / "Chrome" / "Application" / binary_name,

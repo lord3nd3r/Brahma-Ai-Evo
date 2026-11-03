@@ -7,11 +7,14 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-import pyautogui
+try:
+    import pyautogui
+    pyautogui.FAILSAFE = True
+    pyautogui.PAUSE = 0.08
+except Exception as exc:
+    pyautogui = None  # type: ignore[assignment]
+    print(f"[send_message] pyautogui unavailable ({exc}). Install python3-tk and use an X11 session.")
 import pyperclip
-
-pyautogui.FAILSAFE = True
-pyautogui.PAUSE = 0.08
 
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
