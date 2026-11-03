@@ -26,7 +26,7 @@ if platform.system() == "Windows":
 
 from PyQt6.QtCore import (
     QEasingCurve, QEvent, QPoint, QPointF, QRectF, QSize, Qt,
-    QTimer, QUrl, QPropertyAnimation, pyqtSignal, QCoreApplication,
+    QTimer, QUrl, QPropertyAnimation, pyqtSignal, QCoreApplication, QObject,
 )
 from PyQt6.QtGui import (
     QAction, QBrush, QColor, QDragEnterEvent, QDropEvent, QFont,
@@ -9420,6 +9420,18 @@ class FloatingLauncher(QWidget):
 
 
 
+class _GeometryWatcher(QObject):
+    """Calls `callback` when the watched widget is resized, moved or shown."""
+    def __init__(self, callback, parent=None):
+        super().__init__(parent)
+        self._cb = callback
+
+    def eventFilter(self, obj, event):
+        if event.type() in (QEvent.Type.Resize, QEvent.Type.Move, QEvent.Type.Show):
+            QTimer.singleShot(0, self._cb)
+        return False
+
+
 class FloatingGestureCard(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -9428,7 +9440,8 @@ class FloatingGestureCard(QWidget):
         self.lay.setSpacing(8)
         
         self.btn = QPushButton("🖐 Gestures")
-        self.btn.setFixedSize(100, 36)
+        self.btn.setFixedHeight(36)
+        self.btn.setMinimumWidth(110)
         self.btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn.setStyleSheet(
             "QPushButton { background: #0c0e12; color: #ffffff; border: 1px solid rgba(0, 229, 255, 0.20); border-radius: 8px; font-weight: bold; }"
@@ -9642,6 +9655,11 @@ class MainWindow(QMainWindow):
 
         self._floating_gesture_card = FloatingGestureCard(self.centralWidget())
         self._floating_gesture_card.show()
+        # Re-place the card whenever the taskbar's geometry settles or changes
+        # (it is not laid out yet on the first resizeEvent).
+        self._taskbar_geo_watch = _GeometryWatcher(lambda: self.resizeEvent(None), self)
+        self._taskbar.installEventFilter(self._taskbar_geo_watch)
+        QTimer.singleShot(0, lambda: self.resizeEvent(None))
 
         self._center_panel = self._build_center_panel_modern(face_path)
         body.addWidget(self._center_panel, stretch=1)
@@ -10135,7 +10153,14 @@ class MainWindow(QMainWindow):
         if hasattr(self, '_floating_gesture_card') and self.centralWidget():
             cw = self.centralWidget()
             rw = self._right_panel.width() if hasattr(self, '_right_panel') and self._right_panel.isVisible() and not getattr(self, '_right_collapsed', False) else 0
-            self._floating_gesture_card.move(cw.width() - rw - self._floating_gesture_card.width() - 20, 20)
+            # Sit just below the top taskbar instead of on top of its buttons.
+            top = 20
+            tb = getattr(self, '_taskbar', None)
+            if tb is not None and tb.isVisible():
+                top = tb.geometry().bottom() + 8
+            self._floating_gesture_card.adjustSize()
+            self._floating_gesture_card.move(cw.width() - rw - self._floating_gesture_card.width() - 20, top)
+            self._floating_gesture_card.raise_()
         if getattr(self, '_briefing_overlay', None) and self._briefing_overlay.isVisible():
             self._position_briefing_overlay()
         if getattr(self, '_remote_overlay', None) and self._remote_overlay.isVisible():
