@@ -21,6 +21,7 @@ from collections import deque
 from pathlib import Path
 
 import psutil
+import shutil
 if platform.system() == "Windows":
     import winreg
 
@@ -16575,7 +16576,11 @@ class BrahmaUI:
                 kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             subprocess.Popen(args, **kwargs)
         except Exception as exc:
-            self._win.write_log(f"ERR: Restart failed: {exc}")
+            _log = getattr(self._win, "write_log", None) or getattr(self._win, "append_log", None)
+            if _log:
+                _log(f"ERR: Restart failed: {exc}")
+            else:
+                print(f"ERR: Restart failed: {exc}")
         self._app.quit()
 
     def _toggle_workspace_on_startup(self, enabled: bool):
