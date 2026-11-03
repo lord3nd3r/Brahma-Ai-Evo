@@ -94,13 +94,14 @@ def analyze_error(
             "user_message":  "Trying a different approach, sir."
         }
 
-    genai.configure(api_key=_get_api_key())
-    model = genai.GenerativeModel(
-        model_name="gemini-3.1-flash-lite",
-        system_instruction=ERROR_ANALYST_PROMPT
-    )
+    try:
+        genai.configure(api_key=_get_api_key())
+        model = genai.GenerativeModel(
+            model_name="gemini-3.1-flash-lite",
+            system_instruction=ERROR_ANALYST_PROMPT
+        )
 
-    prompt = f"""Failed step:
+        prompt = f"""Failed step:
 Tool: {step.get('tool')}
 Description: {step.get('description')}
 Parameters: {json.dumps(step.get('parameters', {}), indent=2)}
@@ -111,7 +112,6 @@ Error:
 
 Attempt number: {attempt}"""
 
-    try:
         response = model.generate_content(prompt)
         text     = response.text.strip()
         text     = re.sub(r"```(?:json)?", "", text).strip().rstrip("`").strip()

@@ -149,17 +149,17 @@ class NetSentinel:
         elif sys.platform.startswith("linux"):
             # Method 1: /proc/net/route (0ms, no child process)
             try:
-                if os.path.exists("/proc/net/route"):
+                route_file = Path("/proc/net/route")
+                if route_file.exists():
                     import struct
-                    with open("/proc/net/route", "r") as f:
-                        for line in f.readlines()[1:]:
-                            fields = line.strip().split()
-                            if len(fields) >= 3 and fields[1] == "00000000":
-                                gw_hex = fields[2]
-                                gw_ip = socket.inet_ntoa(struct.pack("<L", int(gw_hex, 16)))
-                                if gw_ip and gw_ip != "0.0.0.0":
-                                    gateway_ip = gw_ip
-                                    break
+                    for line in route_file.read_text(encoding="utf-8", errors="ignore").splitlines()[1:]:
+                        fields = line.strip().split()
+                        if len(fields) >= 3 and fields[1] == "00000000":
+                            gw_hex = fields[2]
+                            gw_ip = socket.inet_ntoa(struct.pack("<L", int(gw_hex, 16)))
+                            if gw_ip and gw_ip != "0.0.0.0":
+                                gateway_ip = gw_ip
+                                break
             except Exception:
                 pass
 

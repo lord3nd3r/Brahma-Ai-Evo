@@ -851,8 +851,11 @@ class DailyBriefingOverlay(QWidget):
         tag.setStyleSheet(f"color: {C.PRI}; letter-spacing: 1px; background: transparent; border: none;")
         lay.addWidget(tag)
 
-        temp = w.get("temp_c")
-        temp_str = f"{temp}°C" if temp is not None else "--°C"
+        from core.units import format_temperature, format_wind_kmh, temperature_symbol
+        temp_str = w.get("temp_display")
+        if not temp_str:
+            temp_c = w.get("temp_c")
+            temp_str = format_temperature(temp_c) if temp_c is not None else f"--{temperature_symbol()}"
         cond = w.get("condition") or "Clear"
         city = w.get("city") or "Local Station"
 
@@ -870,8 +873,11 @@ class DailyBriefingOverlay(QWidget):
         lay.addLayout(val_row)
 
         hum = w.get("humidity", "--")
-        wind = w.get("wind_kmph", "--")
-        meta_lbl = QLabel(f"Humidity: {hum}% • Wind: {wind} km/h")
+        hum_text = hum if isinstance(hum, str) and str(hum).endswith("%") else f"{hum}%"
+        wind = w.get("wind")
+        if not isinstance(wind, str) or not wind.strip():
+            wind = format_wind_kmh(w.get("wind_kmph"))
+        meta_lbl = QLabel(f"Humidity: {hum_text} • Wind: {wind}")
         meta_lbl.setFont(QFont("Segoe UI", 8))
         meta_lbl.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent; border: none;")
         lay.addWidget(meta_lbl)
@@ -10251,7 +10257,8 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_bar_tmp"):
             if tmp >= 0:
                 tmp_pct = min(100, (tmp / 100) * 100)
-                self._bar_tmp.set_value(tmp_pct, f"{tmp:.0f}°C")
+                from core.units import format_temperature
+                self._bar_tmp.set_value(tmp_pct, format_temperature(tmp, digits=0))
             else:
                 self._bar_tmp.set_value(0, "N/A")
         if hasattr(self, "_stat_cam"):
@@ -12426,6 +12433,21 @@ class SystemConnectivityPage(QWidget):
 
         lay.addWidget(identity_card)
 
+        from core.units import get_units
+        imperial_units = get_units() == "imperial"
+        units_card = self._card(
+            "Units",
+            "Temperatures, wind, and distances in weather, briefings, and the globe.",
+        )
+        units_lay = units_card.layout()
+        self._units_btn = self._mk_toggle(
+            "Imperial units (°F, mph, miles)" if imperial_units else "Metric units (°C, km/h, km)",
+            imperial_units,
+            self._toggle_units,
+        )
+        units_lay.addWidget(self._units_btn)
+        lay.addWidget(units_card)
+
         # AI Providers
         card = self._card("AI Providers", "Only the supported providers are shown here.")
         lay1 = card.layout()
@@ -13931,6 +13953,21 @@ class SystemConnectivityPage(QWidget):
         if hasattr(self, "_sfx_val_lbl"):
             self._sfx_val_lbl.setText(f"{val}%")
         self._set_setting("sound_effects_volume", val)
+
+    def _toggle_units(self, checked: bool):
+        value = "imperial" if checked else "metric"
+        self._set_setting("units", value)
+        if hasattr(self, "_units_btn"):
+            self._units_btn.setText(
+                "Imperial units (°F, mph, miles)" if checked else "Metric units (°C, km/h, km)"
+            )
+        try:
+            from core.globe_window import GlobeWindow
+            globe = GlobeWindow._instance if hasattr(GlobeWindow, "_instance") else None
+            if globe is not None and getattr(globe, "_web_view", None) is not None:
+                globe._web_view.page().runJavaScript(f"window.BRAHMA_UNITS = '{value}';")
+        except Exception:
+            pass
 
     def _set_setting(self, key: str, value):
         if self._ctrl() and hasattr(self._ctrl(), "_win"):

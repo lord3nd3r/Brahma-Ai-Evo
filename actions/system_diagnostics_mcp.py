@@ -15,6 +15,8 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 import psutil
 
+from core.units import format_temperature
+
 logger = logging.getLogger("SystemDiagnosticsMCP")
 
 # Safe blocklist of critical Windows system processes that must never be terminated
@@ -498,7 +500,7 @@ def system_diagnostics(
         lines = [
             "🖥️ OS HARDWARE & SYSTEM DIAGNOSTICS REPORT",
             "─────────────────────────────────────────",
-            f"⚡ CPU: {cpu['usage_percent']}% utilization ({cpu['logical_cores']} logical cores)" + (f" | Temp: {cpu['temp_c']}°C" if cpu['temp_c'] else ""),
+            f"⚡ CPU: {cpu['usage_percent']}% utilization ({cpu['logical_cores']} logical cores)" + (f" | Temp: {format_temperature(cpu['temp_c'])}" if cpu['temp_c'] else ""),
             f"📊 RAM: {ram['usage_percent']}% used ({ram['used_gb']} GB / {ram['total_gb']} GB) — {ram['available_gb']} GB free",
             f"🔋 Power: {bat.get('status_text', 'N/A')}",
             f"⏱️ Uptime: {diag['uptime']} ({diag['running_processes_count']} active processes)",

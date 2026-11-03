@@ -268,17 +268,23 @@ def _load_system_prompt() -> str:
         except Exception as e_rules:
             print(f"[LearnedRules] Error injecting rules into prompt: {e_rules}")
 
-        return identity_str + base_prompt
+        from core.units import prompt_clause
+        return identity_str + base_prompt + "\n\n" + prompt_clause()
     except Exception as e:
         print(f"Error injecting identity: {e}")
         try:
             from core.learned_rules import LearnedRulesEngine
             learned_directives = LearnedRulesEngine.get_prompt_injections()
             if learned_directives:
-                return f"{learned_directives}\n\n" + base_prompt
+                from core.units import prompt_clause
+                return f"{learned_directives}\n\n" + base_prompt + "\n\n" + prompt_clause()
         except Exception:
             pass
-        return base_prompt
+        try:
+            from core.units import prompt_clause
+            return base_prompt + "\n\n" + prompt_clause()
+        except Exception:
+            return base_prompt
 
 
 def _speak_daily_briefing(ui=None, speak=None) -> None:
@@ -1042,7 +1048,9 @@ TOOL_DECLARATIONS = [
         "name": "weather_report",
         "description": (
             "Fetches live real-time weather, forecast, and temperature for any city or location. "
-            "Call this whenever the user asks about the weather, temperature, rain, or forecast for any city or location."
+            "Call this whenever the user asks about the weather, temperature, rain, or forecast for any city or location. "
+            "The result is already in the user's units: degrees Fahrenheit and miles per hour when units are imperial, "
+            "or degrees Celsius and kilometers per hour when units are metric. Repeat those units; do not convert them."
         ),
         "parameters": {
             "type": "OBJECT",
@@ -5067,8 +5075,9 @@ class BrahmaLive:
                     if not prompt_txt:
                         prompt_txt = "You are Brahma Evo, the autonomous desktop operating system."
 
+                    from core.units import prompt_clause
                     system_prompt = (
-                        f"{prompt_txt}\n\n"
+                        f"{prompt_txt}\n\n{prompt_clause()}\n\n"
                         "CRITICAL OPERATING SYSTEM DIRECTIVE:\n"
                         "- You have FULL DIRECT ACCESS and authority over this Windows PC via your tools.\n"
                         "- NEVER state that you are a text-based AI, that you cannot perform automations, or that you lack real-time access.\n"

@@ -163,12 +163,18 @@ def test_inspect_router_structure():
     }):
         with patch.object(sentinel, "scan_device_ports", return_value={"open_ports": [80, 22, 53]}):
             with patch.object(sentinel, "ping_target", return_value={"success": True, "avg_latency_ms": 1.5}):
-                with patch("subprocess.check_output", return_value="192.168.0.1  28-87-ba-d0-ec-ba  dynamic"):
-                    res = sentinel.inspect_router()
-                    assert res["success"] is True
-                    assert res["gateway_ip"] == "192.168.0.1"
-                    assert res["mac_address"] == "28-87-BA-D0-EC-BA"
-                    assert "TP-Link" in res["vendor"]
+                with patch.object(sentinel, "probe_http", return_value={"title": "TP-Link Archer", "snippet": "", "server": ""}):
+                    with patch("subprocess.check_output", return_value="192.168.0.1  28-87-ba-d0-ec-ba  dynamic"):
+                        linux_arp = (
+                            "IP address       HW type     Flags       HW address            Mask     Device\n"
+                            "192.168.0.1      0x1         0x2         28:87:ba:d0:ec:ba     *        eth0\n"
+                        )
+                        with patch("pathlib.Path.exists", return_value=True), patch("pathlib.Path.read_text", return_value=linux_arp):
+                            res = sentinel.inspect_router()
+                            assert res["success"] is True
+                            assert res["gateway_ip"] == "192.168.0.1"
+                            assert res["mac_address"].replace(":", "-") == "28-87-BA-D0-EC-BA"
+                            assert "TP-Link" in res["vendor"]
                     assert 80 in res["open_ports"]
                     assert "Online" in res["status"]
 

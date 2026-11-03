@@ -27,6 +27,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
 
+from core.units import format_wind_kmh, spoken_temperature_name, spoken_wind_name, is_imperial, celsius_to_fahrenheit, kmh_to_mph
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 BRIEFING_FETCH_TIMEOUT_SECONDS = 8.0
 
@@ -61,13 +63,20 @@ def _get_weather_intel(city: Optional[str] = None) -> Dict[str, Any]:
         return get_live_weather(city)
     except Exception as e:
         print(f"[DailyBriefing] Weather fetch notice: {e}")
+        temp_c = 26
+        wind_kmh = 10
+        display_temp = int(round(celsius_to_fahrenheit(temp_c))) if is_imperial() else temp_c
         return {
             "status": "unavailable",
             "city": city or "Local Area",
-            "temp_c": 26,
+            "temp_c": temp_c,
+            "temp": display_temp,
             "condition": "Clear",
             "humidity": "60%",
-            "wind": "10 km/h",
+            "wind": format_wind_kmh(wind_kmh),
+            "wind_kmph": wind_kmh,
+            "wind_mph": int(round(kmh_to_mph(wind_kmh))),
+            "wind_spoken": f"{int(round(kmh_to_mph(wind_kmh) if is_imperial() else wind_kmh))} {spoken_wind_name()}",
             "summary": "Weather telemetry unavailable",
         }
 
@@ -316,9 +325,13 @@ def compile_unified_briefing(category: str = "all", city: Optional[str] = None) 
     # 1. Weather
     if weather.get("status") == "success":
         c_name = weather.get("city", "your area")
-        temp = weather.get("temp_c", 26)
+        temp = weather.get("temp", weather.get("temp_c", 26))
         cond = weather.get("condition", "Clear")
-        narrative_parts.append(f"Currently in {c_name}, it's {temp} degrees Celsius with {cond.lower()}.")
+        wind_spoken = weather.get("wind_spoken")
+        wind_clause = f" Wind is {wind_spoken}." if wind_spoken else ""
+        narrative_parts.append(
+            f"Currently in {c_name}, it's {temp} {spoken_temperature_name()} with {cond.lower()}.{wind_clause}"
+        )
     
     # 2. Calendar
     if calendar.get("count", 0) > 0:

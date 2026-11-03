@@ -243,6 +243,13 @@ class GlobeWindow(QWidget):
     def _on_load_finished(self, ok: bool):
         self._is_page_loaded = ok
         if ok and self._web_view:
+            try:
+                from core.units import get_units
+                self._web_view.page().runJavaScript(
+                    f"window.BRAHMA_UNITS = '{get_units()}';"
+                )
+            except Exception:
+                pass
             if not self.isVisible():
                 self._web_view.page().runJavaScript("if (window.BrahmaGlobe && window.BrahmaGlobe.pause) window.BrahmaGlobe.pause();")
             else:

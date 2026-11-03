@@ -6,6 +6,16 @@ import webbrowser
 from urllib.parse import quote_plus
 from typing import Dict, Any, Optional
 
+from core.units import (
+    celsius_to_fahrenheit,
+    format_temperature,
+    format_wind_kmh,
+    is_imperial,
+    kmh_to_mph,
+    spoken_temperature_name,
+    spoken_wind_name,
+)
+
 
 def get_live_weather(city: Optional[str] = None) -> Dict[str, Any]:
     """
@@ -40,15 +50,23 @@ def get_live_weather(city: Optional[str] = None) -> Dict[str, Any]:
     else:
         url = "https://wttr.in/?format=j1"
 
+    fallback_c = 26
+    fallback_kmh = 10
     fallback = {
         "status": "unavailable",
         "city": target_city or "Local Area",
-        "temp_c": 26,
+        "temp_c": fallback_c,
+        "temp_f": int(round(celsius_to_fahrenheit(fallback_c))),
+        "temp": int(round(celsius_to_fahrenheit(fallback_c))) if is_imperial() else fallback_c,
         "condition": "Clear",
         "humidity": "65%",
-        "wind": "10 km/h",
-        "feels_like": 26,
+        "wind": format_wind_kmh(fallback_kmh),
+        "wind_kmph": fallback_kmh,
+        "wind_mph": int(round(kmh_to_mph(fallback_kmh))),
+        "wind_spoken": format_wind_kmh(fallback_kmh, spoken=True),
+        "feels_like": int(round(celsius_to_fahrenheit(fallback_c))) if is_imperial() else fallback_c,
         "summary": "Weather telemetry temporarily offline.",
+        "units": "imperial" if is_imperial() else "metric",
     }
 
     try:
@@ -66,21 +84,36 @@ def get_live_weather(city: Optional[str] = None) -> Dict[str, Any]:
                 area_names = nearest.get("areaName", [{}])
                 detected_city = area_names[0].get("value") if area_names else "Current Location"
 
-            temp_c = int(current.get("temp_C", 26))
+            temp_c = int(float(current.get("temp_C", 26)))
+            temp_f = int(float(current.get("temp_F", round(celsius_to_fahrenheit(temp_c)))))
+            wind_kmh = float(current.get("windspeedKmph") or 10)
+            wind_mph = float(current.get("windspeedMiles") or kmh_to_mph(wind_kmh))
+            feels_c = int(float(current.get("FeelsLikeC", temp_c)))
+            feels_f = int(float(current.get("FeelsLikeF", round(celsius_to_fahrenheit(feels_c)))))
             desc = current.get("weatherDesc", [{}])[0].get("value", "Clear")
             humidity = f"{current.get('humidity', '60')}%"
-            wind_speed = f"{current.get('windspeedKmph', '10')} km/h"
-            feels_like = int(current.get("FeelsLikeC", temp_c))
+            imperial = is_imperial()
+            display_temp = temp_f if imperial else temp_c
+            display_wind = f"{int(round(wind_mph))} mph" if imperial else f"{int(round(wind_kmh))} km/h"
+            display_feels = feels_f if imperial else feels_c
 
             return {
                 "status": "success",
                 "city": detected_city,
                 "temp_c": temp_c,
+                "temp_f": temp_f,
+                "temp": display_temp,
+                "temp_display": format_temperature(temp_c),
                 "condition": desc,
                 "humidity": humidity,
-                "wind": wind_speed,
-                "feels_like": feels_like,
-                "summary": f"{temp_c}°C, {desc} in {detected_city}",
+                "wind": display_wind,
+                "wind_kmph": int(round(wind_kmh)),
+                "wind_mph": int(round(wind_mph)),
+                "wind_spoken": f"{int(round(wind_mph if imperial else wind_kmh))} {spoken_wind_name()}",
+                "feels_like": display_feels,
+                "feels_like_c": feels_c,
+                "summary": f"{format_temperature(temp_c)}, {desc} in {detected_city}",
+                "units": "imperial" if imperial else "metric",
             }
     except Exception as e:
         print(f"[Weather] Live weather fetch notice: {e}")
@@ -101,10 +134,14 @@ def weather_action(
 
     weather = get_live_weather(city)
     city_name = weather.get("city", "your area")
-    temp = weather.get("temp_c", 26)
+    temp = weather.get("temp", weather.get("temp_c", 26))
     cond = weather.get("condition", "Clear")
+    wind_spoken = weather.get("wind_spoken") or format_wind_kmh(weather.get("wind_kmph"))
 
-    msg = f"The weather in {city_name} is currently {temp} degrees Celsius with {cond}."
+    msg = (
+        f"The weather in {city_name} is currently {temp} {spoken_temperature_name()} "
+        f"with {cond}, and the wind is {wind_spoken}."
+    )
     _speak_and_log(msg, player)
 
     # Optional browser fallback if user explicitly asks or city was specified

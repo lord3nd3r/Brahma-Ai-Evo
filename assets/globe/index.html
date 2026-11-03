@@ -655,12 +655,12 @@
             <span style="color:#38bdf8;">📍</span>
             <span id="loc-card-name">Location</span>
             <span id="loc-weather-pill" class="weather-pill" style="display:none;">
-                <span id="weather-icon">⛅</span> <span id="weather-temp">--°C</span>
+                <span id="weather-icon">⛅</span> <span id="weather-temp">--</span>
             </span>
         </div>
         <div class="loc-coords" id="loc-card-coords">0.0° N, 0.0° E</div>
         <div id="loc-weather-details" style="display:none; font-size:9px; color:#94a3b8; margin-top:3px;">
-            Humidity: <span id="weather-hum">--</span>% | Wind: <span id="weather-wind">--</span> km/h | <span id="weather-cond">Fair</span>
+            Humidity: <span id="weather-hum">--</span>% | Wind: <span id="weather-wind">--</span> <span id="weather-wind-unit"></span> | <span id="weather-cond">Fair</span>
         </div>
     </div>
 
@@ -787,6 +787,26 @@
         // ==========================================
         // DUAL HYBRID GLOBE & STREET-LEVEL ENGINE
         // ==========================================
+        function brahmaUnits() {
+            if (window.BRAHMA_UNITS === 'imperial' || window.BRAHMA_UNITS === 'metric') {
+                return window.BRAHMA_UNITS;
+            }
+            const lang = (navigator.language || '').toLowerCase();
+            if (!lang || lang === 'en-us' || lang.endsWith('-us')) return 'imperial';
+            return 'metric';
+        }
+        function formatDistanceKm(km) {
+            const n = Number(km);
+            if (!Number.isFinite(n)) return '--';
+            if (brahmaUnits() === 'imperial') return `${Math.round(n * 0.621371).toLocaleString()} mi`;
+            return `${Math.round(n).toLocaleString()} km`;
+        }
+        function formatSpeedKmh(kmh) {
+            const n = Number(kmh);
+            if (!Number.isFinite(n)) return '--';
+            if (brahmaUnits() === 'imperial') return `${Math.round(n * 0.621371).toLocaleString()} mph`;
+            return `${Math.round(n).toLocaleString()} km/h`;
+        }
         let currentMode = "3D"; // "3D", "STREET", "SATELLITE"
         const GLOBE_RADIUS = 100;
 
@@ -1253,11 +1273,17 @@
 
             if (data.weather) {
                 const w = data.weather;
+                const temp = w.temperature != null ? w.temperature : w.temperature_c;
+                const tempUnit = w.temperature_unit || (brahmaUnits() === 'imperial' ? 'F' : 'C');
+                const wind = w.wind_speed != null ? w.wind_speed : w.wind_kmh;
+                const windUnit = w.wind_unit || (brahmaUnits() === 'imperial' ? 'mph' : 'km/h');
                 document.getElementById('weather-icon').innerText = w.icon || '⛅';
-                document.getElementById('weather-temp').innerText = `${w.temperature_c}°C`;
+                document.getElementById('weather-temp').innerText = `${temp}°${tempUnit}`;
                 document.getElementById('loc-weather-pill').style.display = 'inline-flex';
                 document.getElementById('weather-hum').innerText = w.humidity;
-                document.getElementById('weather-wind').innerText = w.wind_kmh;
+                document.getElementById('weather-wind').innerText = wind;
+                const windUnitEl = document.getElementById('weather-wind-unit');
+                if (windUnitEl) windUnitEl.innerText = windUnit;
                 document.getElementById('weather-cond').innerText = w.condition;
                 document.getElementById('loc-weather-details').style.display = 'block';
             } else {
@@ -1337,7 +1363,7 @@
             document.getElementById('dest-city').innerText = meta.destName || 'Destination';
             document.getElementById('dest-coords').innerText = `${activeRouteData.destLat.toFixed(2)}°, ${activeRouteData.destLon.toFixed(2)}°`;
 
-            document.getElementById('route-dist-km').innerText = meta.distance_km ? `${meta.distance_km.toLocaleString()} km` : '---';
+            document.getElementById('route-dist-km').innerText = meta.distance_km ? formatDistanceKm(meta.distance_km) : '---';
             document.getElementById('route-dist-nm').innerText = meta.distance_nm ? `${meta.distance_nm.toLocaleString()} NM` : '---';
             document.getElementById('route-flight-time').innerText = meta.flight_time || '---';
             document.getElementById('route-bearing').innerText = meta.bearing ? `${meta.bearing}°` : '---';
@@ -1526,7 +1552,7 @@
                 if (activeRouteData) {
                     renderRoute2D(activeRouteData);
                     const m = activeRouteData.meta || {};
-                    document.getElementById('route-dist-km').innerText = m.distance_km ? `${m.distance_km.toLocaleString()} km` : '---';
+                    document.getElementById('route-dist-km').innerText = m.distance_km ? formatDistanceKm(m.distance_km) : '---';
                     document.getElementById('route-dist-nm').innerText = m.distance_nm ? `${m.distance_nm.toLocaleString()} NM` : '---';
                     document.getElementById('route-flight-time').innerText = m.flight_time || '---';
                     document.getElementById('route-bearing').innerText = m.bearing ? `${m.bearing}°` : '---';
@@ -1597,7 +1623,11 @@
         // --- Weather Layer & Telemetry ---
         async function fetchWeatherForLocation(lat, lon) {
             try {
-                const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code`;
+                const imperial = brahmaUnits() === 'imperial';
+                const unitQuery = imperial
+                    ? 'temperature_unit=fahrenheit&wind_speed_unit=mph'
+                    : 'temperature_unit=celsius&wind_speed_unit=kmh';
+                const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&${unitQuery}`;
                 const resp = await fetch(url);
                 const d = await resp.json();
                 const curr = d.current || {};
@@ -1610,10 +1640,12 @@
                 const cond = (wcode === 0) ? 'Clear Sky' : (wcode < 3) ? 'Partly Cloudy' : (wcode < 50) ? 'Overcast' : (wcode < 70) ? 'Rain' : 'Thunderstorm';
 
                 document.getElementById('weather-icon').innerText = icon;
-                document.getElementById('weather-temp').innerText = `${temp}°C`;
+                document.getElementById('weather-temp').innerText = `${temp}°${imperial ? 'F' : 'C'}`;
                 document.getElementById('loc-weather-pill').style.display = 'inline-flex';
                 document.getElementById('weather-hum').innerText = hum;
                 document.getElementById('weather-wind').innerText = wind;
+                const windUnitEl = document.getElementById('weather-wind-unit');
+                if (windUnitEl) windUnitEl.innerText = imperial ? 'mph' : 'km/h';
                 document.getElementById('weather-cond').innerText = cond;
                 document.getElementById('loc-weather-details').style.display = 'block';
             } catch (e) {}
@@ -1682,11 +1714,11 @@
         function updateIssDisplay(d) {
             const lat = d.latitude || d.lat || 0;
             const lon = d.longitude || d.lon || 0;
-            const alt = Math.round(d.altitude || d.altitude_km || 420);
-            const vel = Math.round(d.velocity || d.velocity_kmh || 27600).toLocaleString();
+            const alt = d.altitude || d.altitude_km || 420;
+            const vel = d.velocity || d.velocity_kmh || 27600;
 
-            document.getElementById('iss-velocity').innerText = `${vel} km/h`;
-            document.getElementById('iss-altitude').innerText = `${alt} km`;
+            document.getElementById('iss-velocity').innerText = formatSpeedKmh(vel);
+            document.getElementById('iss-altitude').innerText = formatDistanceKm(alt);
             document.getElementById('iss-lat').innerText = `${lat.toFixed(2)}°`;
             document.getElementById('iss-lon').innerText = `${lon.toFixed(2)}°`;
 
@@ -2013,7 +2045,7 @@
                 const pLat = parseFloat(p.lat);
                 const pLon = parseFloat(p.lon);
                 const name = p.name || p.display_name.split(',')[0];
-                const dist = p.distance_km ? `${p.distance_km} km away` : '';
+                const dist = p.distance_km ? `${formatDistanceKm(p.distance_km)} away` : '';
 
                 const icon = L.divIcon({
                     className: 'custom-pin',

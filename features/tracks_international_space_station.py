@@ -85,12 +85,13 @@ def execute(**kwargs):
         plt.savefig(image_path, dpi=300, bbox_inches='tight', facecolor=fig.get_facecolor())
         plt.close(fig) # Close the figure to free up memory
 
+        from core.units import format_distance_km, format_wind_kmh
         summary = (
             f"The International Space Station is currently at:\n"
             f"Latitude: {latitude:.4f}°\n"
             f"Longitude: {longitude:.4f}°\n"
-            f"Altitude: {altitude_km:.2f} km\n"
-            f"Speed: {velocity_kmh:.2f} km/h"
+            f"Altitude: {format_distance_km(altitude_km, digits=1)}\n"
+            f"Speed: {format_wind_kmh(velocity_kmh, digits=1)}"
         )
 
         return {

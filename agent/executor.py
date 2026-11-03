@@ -658,7 +658,14 @@ class AgentExecutor:
             if speak: speak("Adjusting my approach, sir.")
 
             replan_attempts += 1
-            plan = replan(goal, completed_steps, failed_step, failed_error)
+            try:
+                plan = replan(goal, completed_steps, failed_step, failed_error)
+            except Exception as exc:
+                print(f"[Executor] Replan unavailable: {exc}")
+                msg = f"Task failed, sir. {failed_error}"
+                if speak:
+                    speak(msg)
+                return msg
 
     def _summarize(self, goal: str, completed_steps: list, speak: Callable | None) -> str:
         fallback = f"All done, sir. Completed {len(completed_steps)} steps for: {goal[:60]}."

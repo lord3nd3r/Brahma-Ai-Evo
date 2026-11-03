@@ -501,7 +501,8 @@ def fetch_nearby_places(query_or_category: str, center_lat: Optional[float] = No
                     )), 2)
 
                     addr_parts = [tags.get("addr:street"), tags.get("addr:suburb"), tags.get("addr:city")]
-                    addr_str = ", ".join([p for p in addr_parts if p]) or f"{dist_km} km away"
+                    from core.units import format_distance_km
+                    addr_str = ", ".join([p for p in addr_parts if p]) or f"{format_distance_km(dist_km)} away"
 
                     places.append({
                         "name": name,
@@ -556,9 +557,18 @@ def fetch_nearby_places(query_or_category: str, center_lat: Optional[float] = No
 
 def fetch_location_weather(lat: float, lon: float) -> Dict[str, Any]:
     """Fetch live weather metrics (temperature, humidity, wind, condition) from Open-Meteo."""
+    from core.units import (
+        celsius_to_fahrenheit,
+        fahrenheit_to_celsius,
+        is_imperial,
+        kmh_to_mph,
+        mph_to_kmh,
+        open_meteo_unit_query,
+    )
     url = (
         f"https://api.open-meteo.com/v1/forecast?"
         f"latitude={lat:.4f}&longitude={lon:.4f}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code"
+        f"&{open_meteo_unit_query()}"
     )
     code_map = {
         0: ("Clear Sky", "☀️"),
@@ -580,27 +590,55 @@ def fetch_location_weather(lat: float, lon: float) -> Dict[str, Any]:
         with urllib.request.urlopen(req, timeout=4) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             curr = data.get("current", {})
-            temp_c = curr.get("temperature_2m", 25.0)
+            reported_temp = float(curr.get("temperature_2m", 25.0))
             hum = curr.get("relative_humidity_2m", 50)
-            wind = curr.get("wind_speed_10m", 10.0)
+            reported_wind = float(curr.get("wind_speed_10m", 10.0))
             wcode = curr.get("weather_code", 0)
             cond_desc, icon = code_map.get(wcode, ("Partly Cloudy", "⛅"))
+            imperial = is_imperial()
+            if imperial:
+                temp_f = reported_temp
+                temp_c = fahrenheit_to_celsius(temp_f)
+                wind_mph = reported_wind
+                wind_kmh = mph_to_kmh(wind_mph)
+            else:
+                temp_c = reported_temp
+                temp_f = celsius_to_fahrenheit(temp_c)
+                wind_kmh = reported_wind
+                wind_mph = kmh_to_mph(wind_kmh)
             return {
+                "temperature": round(temp_f if imperial else temp_c, 1),
+                "temperature_unit": "F" if imperial else "C",
                 "temperature_c": round(temp_c, 1),
-                "temperature_f": round(temp_c * 9.0 / 5.0 + 32.0, 1),
+                "temperature_f": round(temp_f, 1),
                 "humidity": hum,
-                "wind_kmh": round(wind, 1),
+                "wind_speed": round(wind_mph if imperial else wind_kmh, 1),
+                "wind_unit": "mph" if imperial else "km/h",
+                "wind_kmh": round(wind_kmh, 1),
+                "wind_mph": round(wind_mph, 1),
                 "condition": cond_desc,
                 "icon": icon,
+                "units": "imperial" if imperial else "metric",
             }
-    except Exception as e:
+    except Exception:
+        from core.units import celsius_to_fahrenheit, is_imperial, kmh_to_mph
+        imperial = is_imperial()
+        temp_c, wind_kmh = 28.0, 12.0
+        temp_f = celsius_to_fahrenheit(temp_c)
+        wind_mph = kmh_to_mph(wind_kmh)
         return {
-            "temperature_c": 28.0,
-            "temperature_f": 82.4,
+            "temperature": round(temp_f if imperial else temp_c, 1),
+            "temperature_unit": "F" if imperial else "C",
+            "temperature_c": temp_c,
+            "temperature_f": round(temp_f, 1),
             "humidity": 60,
-            "wind_kmh": 12.0,
+            "wind_speed": round(wind_mph if imperial else wind_kmh, 1),
+            "wind_unit": "mph" if imperial else "km/h",
+            "wind_kmh": wind_kmh,
+            "wind_mph": round(wind_mph, 1),
             "condition": "Fair",
             "icon": "🌤️",
+            "units": "imperial" if imperial else "metric",
         }
 
 

@@ -164,6 +164,7 @@ def test_purge_selected(temp_junk_dir):
         timestamp="2026-10-10 12:00:00",
     )
 
+    engine.current_drive = mock_report.drive
     engine.last_scan_report = mock_report
 
     result = engine.purge_selected(["mock_purge_target"])
