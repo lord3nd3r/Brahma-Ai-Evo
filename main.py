@@ -287,7 +287,52 @@ def _load_system_prompt() -> str:
             return base_prompt
 
 
+_briefing_guard = threading.Lock()
+_last_briefing_at = 0.0
+_BRIEFING_DEDUPE_S = 90.0
+
+
+def reset_startup_briefing_guard() -> None:
+    """Test hook. Production callers rely on the time window."""
+    global _last_briefing_at
+    with _briefing_guard:
+        _last_briefing_at = 0.0
+
+
+def claim_startup_briefing(now: float | None = None) -> bool:
+    """Allow one briefing delivery per window. Startup and the morning sensorium both call this."""
+    global _last_briefing_at
+    moment = time.monotonic() if now is None else now
+    with _briefing_guard:
+        if moment - _last_briefing_at < _BRIEFING_DEDUPE_S:
+            return False
+        _last_briefing_at = moment
+        return True
+
+
+def echo_tail_seconds() -> float:
+    """How long to keep the mic closed after playback ends.
+
+    Linux desktop speakers into a nearby mic ring longer than the 350ms Windows tail.
+    """
+    return 1.0 if sys.platform.startswith("linux") else 0.35
+
+
+def normalize_spoken_text(text: str) -> str:
+    return " ".join((text or "").split()).casefold()
+
+
+def speech_is_duplicate(history: list[tuple[str, float]], text: str, now: float, window: float = 60.0) -> bool:
+    norm = normalize_spoken_text(text)
+    if not norm:
+        return True
+    return any(prev == norm and (now - stamp) < window for prev, stamp in history)
+
+
 def _speak_daily_briefing(ui=None, speak=None) -> None:
+    if not claim_startup_briefing():
+        print("[DailyBriefing] Duplicate briefing suppressed.")
+        return
     try:
         from actions.daily_briefing import compile_unified_briefing
         data, narrative = compile_unified_briefing()
@@ -2373,6 +2418,9 @@ class BrahmaLive:
         self.audio_in_queue = None
         self.out_queue      = None
         self._startup_briefing_started = False
+        self._scripted_delivery_active = False
+        self._recent_spoken: list[tuple[str, float]] = []
+        self._speech_dedupe_lock = threading.Lock()
         self._loop          = None
         self._is_speaking   = False
         self._server_turn_active = False
@@ -2409,6 +2457,7 @@ class BrahmaLive:
         self.ui.on_text_command = self._on_text_command
         self.ui.on_attention_action = self._on_attention_action
         self.ui.on_remote_clicked = self._make_remote_key
+        self.ui.on_stop_speaking = self.trigger_barge_in
         self._echo = EchoGuard()
         self._resume_handle = None
         self._ptt = None
@@ -5229,19 +5278,19 @@ class BrahmaLive:
 
     def trigger_barge_in(self):
         """Immediately interrupts AI speech playback and switches state to LISTENING."""
-        with self._speaking_lock:
-            if not self._is_speaking and not getattr(self, "_server_turn_active", False):
-                return
-            self._is_speaking = False
-            self._server_turn_active = False
-            self._discard_server_audio = True
-            self._last_spoke_time = time.monotonic()
-
         try:
             from actions.attention_monitor import stop_native_speech
             stop_native_speech()
         except Exception:
             pass
+
+        with self._speaking_lock:
+            was_speaking = bool(self._is_speaking or getattr(self, "_server_turn_active", False))
+            self._is_speaking = False
+            self._server_turn_active = False
+            self._discard_server_audio = True
+            self._scripted_delivery_active = False
+            self._last_spoke_time = time.monotonic()
 
         try:
             if self.audio_in_queue:
@@ -5252,6 +5301,9 @@ class BrahmaLive:
                         break
         except Exception:
             pass
+
+        if not was_speaking:
+            return
 
         try:
             from core.live_voice_engine import LiveVoiceEngine
@@ -5272,6 +5324,9 @@ class BrahmaLive:
         text = (text or "").strip()
         if not text:
             return
+        if self._remember_spoken(text):
+            print("[BRAHMA EVO] Skipping duplicate speech within 60s.")
+            return
 
         if hasattr(self.ui, "set_live_subtitles"):
             self.ui.set_live_subtitles("BRAHMA", text, interim=False)
@@ -5283,15 +5338,20 @@ class BrahmaLive:
         if self.session and self._loop:
             # Route text through Gemini Live API for the unified native Charon voice
             import asyncio
+            self._scripted_delivery_active = True
             async def _send():
                 try:
                     prompt = (
-                        f"Deliver this update aloud to the user right now in your Charon voice. "
-                        f"Speak directly to the user as Brahma Evo without saying thank you or acknowledging this prompt:\n{text}"
+                        "Deliver this update aloud to the user exactly once in your Charon voice, "
+                        "then stop and wait silently. Do not repeat it, do not summarize it again, "
+                        "and do not ask a follow-up question. "
+                        "Speak directly to the user as Brahma Evo without saying thank you or acknowledging this prompt:\n"
+                        f"{text}"
                     )
                     content = types.Content(role="user", parts=[types.Part.from_text(text=prompt)])
                     await self.session.send_client_content(turns=[content], turn_complete=True)
                 except Exception as e:
+                    self._scripted_delivery_active = False
                     print(f"[BRAHMA EVO] Charon speech send err: {e}")
                     def _fallback():
                         try:
@@ -5315,6 +5375,27 @@ class BrahmaLive:
                 finally:
                     self.set_speaking(False)
             threading.Thread(target=_speak_thread, daemon=True, name="brahma-offline-speak").start()
+
+    def _remember_spoken(self, text: str) -> bool:
+        """Return True when this exact line was already spoken in the last minute."""
+        now = time.monotonic()
+        with self._speech_dedupe_lock:
+            self._recent_spoken = [
+                item for item in self._recent_spoken if now - item[1] < 60.0
+            ]
+            if speech_is_duplicate(self._recent_spoken, text, now):
+                return True
+            self._recent_spoken.append((normalize_spoken_text(text), now))
+            return False
+
+    def _playback_busy(self) -> bool:
+        queue = getattr(self, "audio_in_queue", None)
+        if queue is None:
+            return False
+        try:
+            return not queue.empty()
+        except Exception:
+            return False
 
     def speak_error(self, tool_name: str, error: str):
         short = str(error)[:120]
@@ -6492,7 +6573,8 @@ class BrahmaLive:
                 
                 now = time.monotonic()
                 last_spoke = getattr(self, "_last_spoke_time", 0.0)
-                in_echo_tail = (now - last_spoke) < 0.35  # 350ms echo tail post-speech
+                in_echo_tail = (now - last_spoke) < echo_tail_seconds()
+                playback_busy = self._playback_busy()
 
                 # 1. Update UI visualizer at smooth throttled rate (< 30fps)
                 if not self.ui.muted:
@@ -6507,8 +6589,8 @@ class BrahmaLive:
                             except Exception:
                                 pass
 
-                # 2. If Brahma is actively speaking: check ONLY for deliberate user barge-in!
-                if brahma_speaking:
+                # 2. If Brahma is actively speaking, or audio is still queued: check ONLY for deliberate user barge-in!
+                if brahma_speaking or playback_busy:
                     norm_lvl = lvl / 32767.0
                     user_speaking = False
                     # Allow a 250ms onset grace period so initial speaker transients do not false-trigger
@@ -6626,7 +6708,16 @@ class BrahmaLive:
                             in_buf = []
 
                             full_out = "".join(out_buf).strip()
-                            if full_out:
+                            scripted = bool(getattr(self, "_scripted_delivery_active", False)) and not full_in
+                            if getattr(self, "_scripted_delivery_active", False) and not full_in:
+                                self._scripted_delivery_active = False
+                            if full_out and scripted:
+                                # The narrative was already written when speak() was asked to deliver it.
+                                # Logging the Live transcription again shows a second System Event
+                                # when the long briefing turn finally completes.
+                                if hasattr(self.ui, "set_live_subtitles"):
+                                    self.ui.set_live_subtitles("BRAHMA", full_out, interim=False)
+                            elif full_out:
                                 self.ui.write_log(f"Brahma Evo: {full_out}")
                                 if hasattr(self.ui, "set_live_subtitles"):
                                     self.ui.set_live_subtitles("BRAHMA", full_out, interim=False)

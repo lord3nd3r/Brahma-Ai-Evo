@@ -4210,10 +4210,56 @@ class WorkspaceSidebar(QWidget):
         self.command_submitted.emit(text)
 
 
+_STOP_IDLE_STYLE = """
+QPushButton {
+    background: rgba(255,255,255,0.04);
+    color: rgba(255,255,255,0.28);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px;
+    font-size: 13px;
+    font-weight: 700;
+}
+QPushButton:disabled {
+    color: rgba(255,255,255,0.22);
+}
+"""
+_STOP_SPEAKING_STYLE = """
+QPushButton {
+    background: rgba(255, 59, 48, 0.28);
+    color: #ff5a52;
+    border: 1px solid rgba(255, 59, 48, 0.85);
+    border-radius: 16px;
+    font-size: 13px;
+    font-weight: 700;
+}
+QPushButton:hover {
+    background: rgba(255, 59, 48, 0.45);
+    color: #ffffff;
+}
+"""
+
+
+def apply_stop_button_state(button, speaking: bool) -> None:
+    """Enable and highlight the stop control only while speech is playing."""
+    button.setEnabled(bool(speaking))
+    button.setStyleSheet(_STOP_SPEAKING_STYLE if speaking else _STOP_IDLE_STYLE)
+
+
+def escape_should_stop_speech(focus_widget) -> bool:
+    """Esc stops speech in the main window, and leaves dialogs their own Esc handling."""
+    widget = focus_widget
+    while widget is not None:
+        if isinstance(widget, QDialog):
+            return False
+        widget = widget.parentWidget()
+    return True
+
+
 class InlineChatWorkspace(QFrame):
     command_submitted = pyqtSignal(str)
     attach_requested = pyqtSignal()
     mic_requested = pyqtSignal()
+    stop_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -4396,6 +4442,14 @@ class InlineChatWorkspace(QFrame):
         self._mic_btn.clicked.connect(self.mic_requested.emit)
         input_row.addWidget(self._mic_btn)
 
+        self._stop_btn = QPushButton("■")
+        self._stop_btn.setFixedSize(28, 28)
+        self._stop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._stop_btn.setToolTip("Stop speaking (Esc)")
+        self._stop_btn.clicked.connect(self.stop_requested.emit)
+        apply_stop_button_state(self._stop_btn, False)
+        input_row.addWidget(self._stop_btn)
+
         self._send_btn = QPushButton("➤")
         self._send_btn.setFixedSize(30, 28)
         self._send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -4425,6 +4479,8 @@ class InlineChatWorkspace(QFrame):
         pass
 
     def set_state(self, state: str):
+        if hasattr(self, "_stop_btn"):
+            apply_stop_button_state(self._stop_btn, (state or "").upper() == "SPEAKING")
         if hasattr(self, "_footer_status") and self._footer_status:
             status_text = {
                 "listening": "Listening to your voice...",
@@ -10979,12 +11035,30 @@ class MainWindow(QMainWindow):
             else:
                 self._log.append_log(f"User: {cmd}")
 
+    def _request_stop_speaking(self):
+        callback = getattr(self, "on_stop_speaking", None)
+        if callback is None:
+            return
+        try:
+            callback()
+        except Exception as exc:
+            print(f"[UI] Stop speaking failed: {exc}")
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape and escape_should_stop_speech(QApplication.focusWidget()):
+            self._request_stop_speaking()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def _apply_state(self, state: str):
         if getattr(self, "_state", None) == state:
             return
         self._state = state
         if hasattr(self, "_bg_widget") and hasattr(self._bg_widget, "set_ai_state"):
             self._bg_widget.set_ai_state(state)
+        if hasattr(self, "_stop_btn"):
+            apply_stop_button_state(self._stop_btn, state == "SPEAKING")
         if hasattr(self, "_chat_workspace") and hasattr(self._chat_workspace, "set_state"):
             self._chat_workspace.set_state(state)
         if hasattr(self, "_command_bar") and hasattr(self._command_bar, "set_state"):
@@ -11533,6 +11607,7 @@ class MainWindow(QMainWindow):
         self._inline_workspace = InlineChatWorkspace()
         self._inline_workspace.attach_requested.connect(self._browse_attachment)
         self._inline_workspace.mic_requested.connect(self._toggle_mute)
+        self._inline_workspace.stop_requested.connect(self._request_stop_speaking)
         self._inline_workspace.command_submitted.connect(self._send)
         self._log = self._inline_workspace
         chat_lay.addWidget(self._inline_workspace, stretch=1)
@@ -11643,6 +11718,14 @@ class MainWindow(QMainWindow):
         """)
         mic.clicked.connect(self._toggle_mute)
         row.addWidget(mic)
+
+        self._stop_btn = QPushButton("■")
+        self._stop_btn.setFixedSize(44, 44)
+        self._stop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._stop_btn.setToolTip("Stop speaking (Esc)")
+        self._stop_btn.clicked.connect(self._request_stop_speaking)
+        apply_stop_button_state(self._stop_btn, False)
+        row.addWidget(self._stop_btn)
 
         self._send_btn = QPushButton()
         self._send_btn.setFixedSize(44, 44)
@@ -16386,6 +16469,14 @@ class BrahmaUI:
     @on_text_command.setter
     def on_text_command(self, cb):
         self._win.on_text_command = cb
+
+    @property
+    def on_stop_speaking(self):
+        return getattr(self._win, "on_stop_speaking", None)
+
+    @on_stop_speaking.setter
+    def on_stop_speaking(self, cb):
+        self._win.on_stop_speaking = cb
 
     @property
     def on_remote_clicked(self):

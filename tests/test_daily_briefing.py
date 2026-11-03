@@ -2,7 +2,7 @@ import time
 from unittest.mock import patch
 
 from actions import daily_briefing
-from main import BrahmaLive, _looks_like_daily_briefing_request, _speak_daily_briefing
+from main import BrahmaLive, _looks_like_daily_briefing_request, _speak_daily_briefing, reset_startup_briefing_guard
 
 
 def test_daily_briefing_returns_when_one_source_times_out(monkeypatch):
@@ -90,6 +90,7 @@ def test_startup_daily_briefing_is_spoken_even_with_overlay_visible():
     data = {"greeting": "Good morning"}
     narrative = "Good morning. Here is your daily briefing."
     spoken = []
+    reset_startup_briefing_guard()
 
     with (
         patch("actions.daily_briefing.compile_unified_briefing", return_value=(data, narrative)),
