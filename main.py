@@ -5324,16 +5324,16 @@ class BrahmaLive:
         text = (text or "").strip()
         if not text:
             return
+
+        if getattr(self, "_in_live_tool", False):
+            # Gemini Live duplex tool execution will vocalize completion via send_tool_response
+            return
         if self._remember_spoken(text):
             print("[BRAHMA EVO] Skipping duplicate speech within 60s.")
             return
 
         if hasattr(self.ui, "set_live_subtitles"):
             self.ui.set_live_subtitles("BRAHMA", text, interim=False)
-
-        if getattr(self, "_in_live_tool", False):
-            # Gemini Live duplex tool execution will vocalize completion via send_tool_response
-            return
 
         if self.session and self._loop:
             # Route text through Gemini Live API for the unified native Charon voice
