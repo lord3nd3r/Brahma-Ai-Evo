@@ -4128,14 +4128,24 @@ class BrahmaLive:
 
             threading.Thread(target=_run_screen_process, daemon=True).start()
             return
-        # Route to preferred provider: Google Gemini, OpenRouter, or Local Brain
+        # Route to preferred provider: Gemini Live, Grok, OpenRouter, or Local Brain.
+        # Only a Gemini selection rides the Live session. Grok has no voice equivalent.
         app_settings = config_manager.load_settings()
         configured_provider = app_settings.get("default_ai_provider", "Gemini")
         is_offline_mode = bool(app_settings.get("offline_mode_enabled", False))
-        is_cloud_gemini = configured_provider in ("Gemini", "Google Gemini")
+        from core.llm_providers import selected_chat_preset, uses_gemini_live_for_text
+        chat_preset = selected_chat_preset()
+        use_live = (
+            configured_provider != "Local"
+            and uses_gemini_live_for_text(
+                chat_preset.id,
+                session_connected=bool(self.session and self._loop),
+                offline=is_offline_mode,
+            )
+        )
 
         # If Gemini Live session is connected and user selected Gemini, route text directly through Live duplex
-        if is_cloud_gemini and self.session and self._loop and not is_offline_mode:
+        if use_live:
             import asyncio
             async def _send_live_text():
                 try:
@@ -4671,6 +4681,18 @@ class BrahmaLive:
             "Reply text:"
         )
         try:
+            from core.llm_providers import try_provider_text
+            routed, notice = try_provider_text(
+                "You are a friendly assistant helping a user rewrite their draft reply for a chat message. "
+                "Keep the same meaning and intent, expand the wording slightly, and make it sound natural and human. "
+                "Do not mention the notification, app, or any internal system details. "
+                "Return only the rewritten reply text.",
+                prompt,
+            )
+            if notice:
+                self.ui.write_log(notice)
+            if routed:
+                return routed
             return _gemini_text_reply(prompt) or user_text
         except Exception:
             try:
@@ -5064,9 +5086,52 @@ class BrahmaLive:
 
             is_cloud_gemini = configured_provider in ("Gemini", "Google Gemini")
             is_cloud_openrouter = configured_provider == "OpenRouter"
+            from core.llm_providers import (
+                active_text_preset,
+                grok_failure_notice,
+                reply_with_tools,
+            )
+            text_preset = active_text_preset()
 
-            # 1. If user explicitly selected Google Gemini, run Gemini FIRST
-            if is_cloud_gemini and not is_offline_mode:
+            # 1. Grok / experimental OpenAI-compatible providers, with Gemini fallback.
+            if text_preset is not None and not is_offline_mode and configured_provider != "Local":
+                try:
+                    self.ui.update_task_workspace(
+                        status=f"Thinking ({text_preset.label})",
+                        output=f"Processing on {text_preset.label}...",
+                        percent=50,
+                    )
+                    from core.units import prompt_clause
+                    reply = reply_with_tools(
+                        text_preset,
+                        system=(
+                            "You are Brahma Evo, a concise, helpful desktop assistant. "
+                            "Reply naturally and briefly. When the user asks for an action, "
+                            "call the matching tool instead of claiming you cannot do it.\n\n"
+                            f"{prompt_clause()}"
+                        ),
+                        user=request_text,
+                        gemini_tools=TOOL_DECLARATIONS,
+                        execute_tool=lambda name, args: self._execute_tool_sync(name, args or {}),
+                    )
+                    print(f"[BRAHMA EVO] {text_preset.label} answered successfully!")
+                except Exception as exc:
+                    print(f"[BRAHMA EVO] {text_preset.label} failed: {exc}")
+                    notice = grok_failure_notice() if text_preset.id == "grok" else (
+                        f"SYS: {text_preset.label} request failed; using Gemini for this reply."
+                    )
+                    self.ui.write_log(notice)
+                    reply = ""
+                    try:
+                        reply = _gemini_text_reply(request_text)
+                    except Exception as e_gem:
+                        print(f"[BRAHMA EVO] Gemini fallback failed: {e_gem}")
+                        if _is_gemini_limit_error(e_gem):
+                            self._use_openrouter_first = True
+                        reply = ""
+
+            # 2. If user explicitly selected Google Gemini, run Gemini FIRST
+            elif is_cloud_gemini and not is_offline_mode:
                 try:
                     self.ui.update_task_workspace(
                         status="Thinking (Gemini)",
@@ -5080,7 +5145,7 @@ class BrahmaLive:
                     if _is_gemini_limit_error(e_gem):
                         self._use_openrouter_first = True
 
-            # 2. If user explicitly selected OpenRouter, run OpenRouter FIRST
+            # 3. If user explicitly selected OpenRouter, run OpenRouter FIRST
             elif is_cloud_openrouter and not is_offline_mode:
                 try:
                     self.ui.update_task_workspace(
@@ -5107,8 +5172,9 @@ class BrahmaLive:
                     else:
                         reply = ""
 
-            # 3. If user explicitly configured Local AI, is in Offline Mode, or cloud provider failed: run Local Brain
-            if not reply and (configured_provider == "Local" or is_offline_mode or not (is_cloud_gemini or is_cloud_openrouter)) and local_brain.is_available():
+            # 4. Local AI when selected, offline, or the cloud provider produced nothing
+            cloud_handled = is_cloud_gemini or is_cloud_openrouter or text_preset is not None
+            if not reply and (configured_provider == "Local" or is_offline_mode or not cloud_handled) and local_brain.is_available():
                 try:
                     self.ui.update_task_workspace(
                         status="Thinking (Local AI)",
@@ -5194,9 +5260,9 @@ class BrahmaLive:
                 except Exception as e_loc:
                     print(f"[BRAHMA EVO] ⚠️ Local Brain failed: {e_loc}")
 
-            # 4. Fallback cascading: if primary cloud choice failed, try secondary cloud choice
+            # 5. Gemini rate-limit still falls through to the OpenRouter client.
             if not reply and not is_offline_mode:
-                if is_cloud_gemini and self._use_openrouter_first:
+                if self._use_openrouter_first and (is_cloud_gemini or (text_preset is not None and text_preset.id == "grok")):
                     try:
                         reply = openrouter_client.chat(request_text)
                     except Exception:

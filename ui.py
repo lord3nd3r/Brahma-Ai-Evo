@@ -11375,15 +11375,15 @@ class MainWindow(QMainWindow):
         try:
             os.makedirs(CONFIG_DIR, exist_ok=True)
             existing = self._load_api_defaults()
-            API_FILE.write_text(
-                json.dumps({
-                    "gemini_api_key":    key,
-                    "openrouter_api_key": or_key,
-                    "anthropic_api_key": existing.get("anthropic_api_key", ""),
-                    "os_system":         os_name,
-                }, indent=4),
-                encoding="utf-8",
-            )
+            if not isinstance(existing, dict):
+                existing = {}
+            existing.update({
+                "gemini_api_key": key,
+                "openrouter_api_key": or_key,
+                "anthropic_api_key": existing.get("anthropic_api_key", ""),
+                "os_system": os_name,
+            })
+            API_FILE.write_text(json.dumps(existing, indent=4), encoding="utf-8")
             self._ready = True
             self._api_ready = True
             if self._overlay:
@@ -11990,8 +11990,12 @@ class SettingsHubPage(QWidget):
         lay.addStretch(2)
 
 class SystemConnectivityPage(QWidget):
+    chat_models_ready = pyqtSignal(str, object)
+
     def __init__(self, controller=None, parent=None):
         super().__init__(parent)
+        self.chat_models_ready.connect(self._apply_chat_models)
+        self._loading_chat_models = False
         self._controller = controller
         self.setObjectName("SystemConnectivityPage")
         self.setStyleSheet(f"""
@@ -12531,6 +12535,8 @@ class SystemConnectivityPage(QWidget):
         units_lay.addWidget(self._units_btn)
         lay.addWidget(units_card)
 
+        lay.addWidget(self._build_chat_provider_card())
+
         # AI Providers
         card = self._card("AI Providers", "Only the supported providers are shown here.")
         lay1 = card.layout()
@@ -12552,15 +12558,19 @@ class SystemConnectivityPage(QWidget):
         controls = QHBoxLayout()
         controls.setSpacing(12)
         self._default_provider = QComboBox()
-        self._default_provider.addItems(["Google Gemini", "OpenRouter", "Local"])
+        self._default_provider.addItems([
+            "Google Gemini",
+            "OpenRouter",
+            "Grok (xAI)",
+            "Ollama (experimental)",
+            "llama.cpp server (experimental)",
+            "Local",
+        ])
         
         current_provider = self._load_app_settings().get("default_ai_provider", "Gemini")
-        if current_provider in {"Gemini", "Google Gemini"}:
-            self._default_provider.setCurrentText("Google Gemini")
-        elif current_provider == "Local":
-            self._default_provider.setCurrentText("Local")
-        else:
-            self._default_provider.setCurrentText("OpenRouter")
+        self._default_provider.blockSignals(True)
+        self._default_provider.setCurrentText(self._legacy_provider_label(current_provider))
+        self._default_provider.blockSignals(False)
             
         self._default_provider.currentTextChanged.connect(self._set_default_provider)
         controls.addWidget(QLabel("Default AI Provider"))
@@ -14131,19 +14141,224 @@ class SystemConnectivityPage(QWidget):
             self._ctrl()._win._set_startup_animation_enabled(bool(checked))
             self._ctrl()._win._refresh_startup_animation_button()
 
+    def _build_chat_provider_card(self) -> QFrame:
+        from core.llm_providers import (
+            CHAT_MODEL_SETTING,
+            get_preset,
+            provider_id_from_setting,
+            visible_presets,
+        )
+
+        card = self._card(
+            "Chat AI provider",
+            "Typed chat, the side chat, and text tool calls use this provider. "
+            "Realtime voice stays on Gemini Live — Grok has no equivalent live voice session. "
+            "Offline / Local mode still uses the local engine.",
+        )
+        lay = card.layout()
+        settings = self._load_app_settings()
+        current_id = provider_id_from_setting(
+            str(settings.get("chat_ai_provider") or settings.get("default_ai_provider") or "gemini")
+        )
+
+        provider_row = QHBoxLayout()
+        provider_row.addWidget(QLabel("Provider"))
+        self._chat_provider = QComboBox()
+        for preset in visible_presets():
+            self._chat_provider.addItem(preset.label, preset.id)
+        self._chat_provider.blockSignals(True)
+        self._chat_provider.setCurrentText(get_preset(current_id).label)
+        self._chat_provider.blockSignals(False)
+        self._chat_provider.currentTextChanged.connect(self._on_chat_provider_changed)
+        provider_row.addWidget(self._chat_provider, 1)
+        lay.addLayout(provider_row)
+
+        self._chat_key_wrap = QWidget()
+        key_row = QHBoxLayout(self._chat_key_wrap)
+        key_row.setContentsMargins(0, 0, 0, 0)
+        self._chat_key_label = QLabel("API key")
+        self._chat_key_label.setMinimumWidth(110)
+        key_row.addWidget(self._chat_key_label)
+        self._chat_key = QLineEdit()
+        self._chat_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self._chat_key.setPlaceholderText("Stored in api_keys.json")
+        self._chat_key.editingFinished.connect(self._save_chat_api_key)
+        key_row.addWidget(self._chat_key, 1)
+        lay.addWidget(self._chat_key_wrap)
+
+        model_row = QHBoxLayout()
+        model_row.addWidget(QLabel("Model"))
+        self._chat_model = QComboBox()
+        self._chat_model.setEditable(True)
+        self._chat_model.lineEdit().setPlaceholderText("Fetched from the provider, or type a model id")
+        saved_model = str(settings.get(CHAT_MODEL_SETTING) or "")
+        if saved_model:
+            self._chat_model.addItem(saved_model)
+            self._chat_model.setCurrentText(saved_model)
+        self._chat_model.activated.connect(lambda _index: self._save_chat_model())
+        self._chat_model.lineEdit().editingFinished.connect(self._save_chat_model)
+        model_row.addWidget(self._chat_model, 1)
+        refresh = QPushButton("Refresh")
+        refresh.clicked.connect(self._refresh_chat_models)
+        model_row.addWidget(refresh)
+        lay.addLayout(model_row)
+
+        self._chat_model_status = QLabel("")
+        self._chat_model_status.setWordWrap(True)
+        self._chat_model_status.setStyleSheet(f"color: {C.TEXT_DIM};")
+        lay.addWidget(self._chat_model_status)
+
+        self._show_chat_key(get_preset(current_id))
+        self._refresh_chat_models()
+        return card
+
+    def _current_chat_preset(self):
+        from core.llm_providers import get_preset
+        preset_id = ""
+        if hasattr(self, "_chat_provider"):
+            preset_id = str(self._chat_provider.currentData() or "")
+        if not preset_id and hasattr(self, "_chat_provider"):
+            from core.llm_providers import provider_id_from_setting
+            preset_id = provider_id_from_setting(self._chat_provider.currentText())
+        return get_preset(preset_id or "gemini")
+
+    def _legacy_provider_label(self, value: str) -> str:
+        from core.llm_providers import provider_id_from_setting
+        raw = (value or "").strip().lower()
+        if raw == "local":
+            return "Local"
+        return {
+            "gemini": "Google Gemini",
+            "openrouter": "OpenRouter",
+            "grok": "Grok (xAI)",
+            "ollama": "Ollama (experimental)",
+            "llamacpp": "llama.cpp server (experimental)",
+        }.get(provider_id_from_setting(value), "Google Gemini")
+
+    def _on_chat_provider_changed(self, label: str):
+        self._set_default_provider(self._legacy_provider_label(label))
+
+    def _show_chat_key(self, preset):
+        if not hasattr(self, "_chat_key"):
+            return
+        needs_key = bool(preset.requires_key and preset.key_field)
+        self._chat_key_wrap.setVisible(needs_key)
+        if not needs_key:
+            return
+        self._chat_key_label.setText("xAI API key" if preset.id == "grok" else "API key")
+        self._chat_key.blockSignals(True)
+        self._chat_key.setText(str(self._load_api_defaults().get(preset.key_field, "") or ""))
+        self._chat_key.setPlaceholderText(f"Stored as {preset.key_field} in api_keys.json")
+        self._chat_key.blockSignals(False)
+
+    def _save_chat_api_key(self):
+        preset = self._current_chat_preset()
+        if not preset.key_field:
+            return
+        data = {}
+        try:
+            if API_FILE.exists():
+                loaded_file = json.loads(API_FILE.read_text(encoding="utf-8"))
+                if isinstance(loaded_file, dict):
+                    data.update(loaded_file)
+        except Exception:
+            data = {}
+        loaded = self._load_api_defaults()
+        if isinstance(loaded, dict):
+            for key, value in loaded.items():
+                data.setdefault(key, value)
+        data[preset.key_field] = self._chat_key.text().strip()
+        try:
+            os.makedirs(CONFIG_DIR, exist_ok=True)
+            API_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
+        except Exception as exc:
+            if self._ctrl() and hasattr(self._ctrl(), "write_log"):
+                self._ctrl().write_log(f"ERR: Could not save API key: {exc}")
+            return
+        self._refresh_chat_models()
+
+    def _save_chat_model(self):
+        if getattr(self, "_loading_chat_models", False) or not hasattr(self, "_chat_model"):
+            return
+        model = self._chat_model.currentText().strip()
+        if not model:
+            return
+        preset = self._current_chat_preset()
+        self._set_setting("chat_ai_model", model)
+        self._set_setting(f"chat_ai_model_{preset.id}", model)
+
+    def _refresh_chat_models(self):
+        from core.llm_providers import list_models
+        if not hasattr(self, "_chat_provider"):
+            return
+        preset = self._current_chat_preset()
+        key = self._chat_key.text().strip() if preset.requires_key and hasattr(self, "_chat_key") else ""
+        provider_id = preset.id
+
+        def work():
+            try:
+                names = list_models(preset, key)
+                error = ""
+            except Exception as exc:
+                names = []
+                error = str(exc)
+            self.chat_models_ready.emit(provider_id, {"names": names, "error": error})
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _apply_chat_models(self, provider_id: str, payload):
+        from core.llm_providers import choose_default_model
+        if not hasattr(self, "_chat_model"):
+            return
+        if self._current_chat_preset().id != provider_id:
+            return
+        names = list((payload or {}).get("names") or [])
+        error = str((payload or {}).get("error") or "")
+        saved = str(self._load_app_settings().get(f"chat_ai_model_{provider_id}") or "").strip()
+        chosen = saved or choose_default_model(provider_id, names)
+        self._loading_chat_models = True
+        try:
+            self._chat_model.blockSignals(True)
+            self._chat_model.clear()
+            for name in names:
+                self._chat_model.addItem(name)
+            if chosen and self._chat_model.findText(chosen) < 0:
+                self._chat_model.addItem(chosen)
+            if chosen:
+                self._chat_model.setCurrentText(chosen)
+            self._chat_model.blockSignals(False)
+        finally:
+            self._loading_chat_models = False
+        if chosen:
+            self._set_setting("chat_ai_model", chosen)
+            if not saved:
+                self._set_setting(f"chat_ai_model_{provider_id}", chosen)
+        if error:
+            self._chat_model_status.setText("Model list unavailable. Type a model id, or check the API key.")
+        elif names:
+            self._chat_model_status.setText("Model list loaded from the provider. You can also type an id.")
+        elif provider_id == "gemini":
+            self._chat_model_status.setText("")
+        else:
+            self._chat_model_status.setText("No models returned. Type a model id once the provider is reachable.")
+
+    def _sync_chat_provider_combo(self, provider_id: str):
+        from core.llm_providers import get_preset
+        if not hasattr(self, "_chat_provider"):
+            return
+        label = get_preset(provider_id).label
+        if self._chat_provider.currentText() == label:
+            self._show_chat_key(get_preset(provider_id))
+            return
+        self._chat_provider.blockSignals(True)
+        self._chat_provider.setCurrentText(label)
+        self._chat_provider.blockSignals(False)
+        self._show_chat_key(get_preset(provider_id))
+
     def _set_default_provider(self, text: str):
+        from core.llm_providers import provider_id_from_setting
         raw = (text or "").strip().lower()
-        if raw.startswith("google") or raw == "gemini":
-            provider = "Gemini"
-            self._set_setting("offline_mode_enabled", False)
-            if hasattr(self, "_offline_mode_btn"):
-                self._offline_mode_btn.blockSignals(True)
-                self._offline_mode_btn.setChecked(False)
-                self._offline_mode_btn.blockSignals(False)
-            if hasattr(self, "_local_ai_widget"):
-                self._local_ai_widget.setVisible(False)
-            msg = "SYS: Default AI provider set to Google Gemini. Cloud connectivity active."
-        elif raw == "local":
+        if raw == "local":
             provider = "Local"
             self._set_setting("offline_mode_enabled", True)
             if hasattr(self, "_offline_mode_btn"):
@@ -14153,17 +14368,59 @@ class SystemConnectivityPage(QWidget):
             if hasattr(self, "_local_ai_widget"):
                 self._local_ai_widget.setVisible(True)
             msg = "SYS: Default AI provider set to Local AI (Ollama). Offline Mode active."
-        else:
+            self._set_setting("default_ai_provider", provider)
+            if hasattr(self, "_sys_provider"):
+                self._sys_provider.setText(provider)
+            if self._ctrl() and hasattr(self._ctrl(), "write_log"):
+                self._ctrl().write_log(msg)
+            return
+
+        chat_id = provider_id_from_setting(raw)
+        if chat_id == "grok":
+            provider = "Grok"
+            msg = "SYS: Chat AI provider set to Grok (xAI). Typed chat uses Grok; realtime voice stays on Gemini Live."
+        elif chat_id == "openrouter":
             provider = "OpenRouter"
-            self._set_setting("offline_mode_enabled", False)
-            if hasattr(self, "_offline_mode_btn"):
-                self._offline_mode_btn.blockSignals(True)
-                self._offline_mode_btn.setChecked(False)
-                self._offline_mode_btn.blockSignals(False)
-            if hasattr(self, "_local_ai_widget"):
-                self._local_ai_widget.setVisible(False)
             msg = "SYS: Default AI provider set to OpenRouter. Cloud connectivity active."
+        elif chat_id == "ollama":
+            provider = "Ollama (experimental)"
+            msg = "SYS: Chat AI provider set to Ollama (experimental)."
+        elif chat_id == "llamacpp":
+            provider = "llama.cpp server (experimental)"
+            msg = "SYS: Chat AI provider set to llama.cpp server (experimental)."
+        else:
+            provider = "Gemini"
+            chat_id = "gemini"
+            msg = "SYS: Default AI provider set to Google Gemini. Cloud connectivity active."
+
+        self._set_setting("offline_mode_enabled", False)
+        if hasattr(self, "_offline_mode_btn"):
+            self._offline_mode_btn.blockSignals(True)
+            self._offline_mode_btn.setChecked(False)
+            self._offline_mode_btn.blockSignals(False)
+        if hasattr(self, "_local_ai_widget"):
+            self._local_ai_widget.setVisible(False)
         self._set_setting("default_ai_provider", provider)
+        self._set_setting("chat_ai_provider", chat_id)
+        specific_model = str(self._load_app_settings().get(f"chat_ai_model_{chat_id}") or "")
+        self._set_setting("chat_ai_model", specific_model)
+        if hasattr(self, "_chat_model"):
+            self._loading_chat_models = True
+            self._chat_model.blockSignals(True)
+            self._chat_model.clear()
+            if specific_model:
+                self._chat_model.addItem(specific_model)
+                self._chat_model.setCurrentText(specific_model)
+            self._chat_model.blockSignals(False)
+            self._loading_chat_models = False
+        if hasattr(self, "_default_provider"):
+            legacy = self._legacy_provider_label(provider)
+            self._default_provider.blockSignals(True)
+            if self._default_provider.findText(legacy) >= 0:
+                self._default_provider.setCurrentText(legacy)
+            self._default_provider.blockSignals(False)
+        self._sync_chat_provider_combo(chat_id)
+        self._refresh_chat_models()
         if hasattr(self, "_sys_provider"):
             self._sys_provider.setText(provider)
         if self._ctrl() and hasattr(self._ctrl(), "write_log"):
@@ -14315,12 +14572,17 @@ class SystemConnectivityPage(QWidget):
             is_offline = bool(app.get("offline_mode_enabled", False))
             if prov == "Local" or is_offline:
                 disp_prov = "Local"
-            elif prov == "OpenRouter":
-                disp_prov = "OpenRouter"
             else:
-                disp_prov = "Google Gemini"
+                disp_prov = self._legacy_provider_label(prov)
             if hasattr(self, "_default_provider"):
                 self._default_provider.setCurrentText(disp_prov)
+            if hasattr(self, "_chat_provider") and not (prov == "Local" or is_offline):
+                from core.llm_providers import get_preset, provider_id_from_setting
+                chat_id = provider_id_from_setting(str(app.get("chat_ai_provider") or prov or "gemini"))
+                self._chat_provider.blockSignals(True)
+                self._chat_provider.setCurrentText(get_preset(chat_id).label)
+                self._chat_provider.blockSignals(False)
+                self._show_chat_key(get_preset(chat_id))
             if hasattr(self, "_offline_mode_btn"):
                 self._offline_mode_btn.setChecked(is_offline or prov == "Local")
             if hasattr(self, "_local_ai_widget"):

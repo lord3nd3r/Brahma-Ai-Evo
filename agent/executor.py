@@ -131,11 +131,29 @@ def _inject_context(params: dict, tool: str, step_results: dict, goal: str = "")
     return params
 
 
-def _detect_language(text: str) -> str:
-    import google.generativeai as genai
-    genai.configure(api_key=_get_api_key())
-    model = genai.GenerativeModel("gemini-3.1-flash-lite")
+def _provider_or_none(system: str, user: str) -> str | None:
     try:
+        from core.llm_providers import try_provider_text
+        text, notice = try_provider_text(system, user)
+    except Exception as exc:
+        print(f"[Executor] Chat provider unavailable: {exc}")
+        return None
+    if notice:
+        print(notice)
+    return text or None
+
+
+def _detect_language(text: str) -> str:
+    routed = _provider_or_none(
+        "Reply with ONLY the language name in English (e.g. Turkish, English, French).",
+        f"What language is this text written in?\n\nText: {text[:200]}",
+    )
+    if routed:
+        return routed
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=_get_api_key())
+        model = genai.GenerativeModel("gemini-3.1-flash-lite")
         response = model.generate_content(
             f"What language is this text written in? "
             f"Reply with ONLY the language name in English (e.g. Turkish, English, French).\n\n"
@@ -150,10 +168,6 @@ def _translate_to_goal_language(content: str, goal: str) -> str:
     if not goal:
         return content
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=_get_api_key())
-        model = genai.GenerativeModel("gemini-3.1-flash-lite")
-
         target_lang = _detect_language(goal)
         print(f"[Executor] 🌐 Translating to: {target_lang}")
 
@@ -167,8 +181,16 @@ def _translate_to_goal_language(content: str, goal: str) -> str:
             f"- Output ONLY the translated text, nothing else\n\n"
             f"Text to translate:\n{content[:4000]}"
         )
-        response = model.generate_content(prompt)
-        translated = response.text.strip()
+        translated = _provider_or_none(
+            "You are a professional translator. Output ONLY the translated text.",
+            prompt,
+        )
+        if not translated:
+            import google.generativeai as genai
+            genai.configure(api_key=_get_api_key())
+            model = genai.GenerativeModel("gemini-3.1-flash-lite")
+            response = model.generate_content(prompt)
+            translated = response.text.strip()
         print(f"[Executor] ✅ Translation done ({target_lang})")
         return translated
     except Exception as e:
@@ -670,9 +692,6 @@ class AgentExecutor:
     def _summarize(self, goal: str, completed_steps: list, speak: Callable | None) -> str:
         fallback = f"All done, sir. Completed {len(completed_steps)} steps for: {goal[:60]}."
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=_get_api_key())
-            model = genai.GenerativeModel(model_name="gemini-2.5-flash")
             steps_str = "\n".join(f"- {s.get('description', '')}" for s in completed_steps)
             prompt    = (
                 f'User goal: "{goal}"\n'
@@ -680,8 +699,16 @@ class AgentExecutor:
                 "Write a single natural sentence summarizing what was accomplished. "
                 "Address the user as 'sir'. Be direct and positive."
             )
-            response = model.generate_content(prompt)
-            summary  = response.text.strip()
+            summary = _provider_or_none(
+                "Write a single natural sentence. Address the user as 'sir'. Be direct and positive.",
+                prompt,
+            )
+            if not summary:
+                import google.generativeai as genai
+                genai.configure(api_key=_get_api_key())
+                model = genai.GenerativeModel(model_name="gemini-2.5-flash")
+                response = model.generate_content(prompt)
+                summary = response.text.strip()
             if speak: speak(summary)
             return summary
         except Exception:

@@ -1,3 +1,9 @@
+"""OpenRouter chat client.
+
+Gemini rate-limit fallback still goes through this module. Selectable chat
+providers (Grok, and later Ollama / llama.cpp) live in core.llm_providers.
+"""
+
 import os
 import json
 import sys

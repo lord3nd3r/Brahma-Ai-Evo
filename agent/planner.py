@@ -403,10 +403,20 @@ def _rewrite_generated_step(step: dict, goal: str) -> None:
     step["parameters"] = {"query": desc[:200]}
 
 
-def create_plan(goal: str, context: str = "") -> dict:
-    import google.generativeai as genai
+def _provider_plan_text(system_prompt: str, user_input: str) -> str | None:
+    """Use Grok (or an experimental local preset) when that chat provider is selected."""
+    try:
+        from core.llm_providers import try_provider_text
+        text, notice = try_provider_text(system_prompt, user_input)
+    except Exception as exc:
+        print(f"[Planner] Chat provider unavailable: {exc}")
+        return None
+    if notice:
+        print(notice)
+    return text or None
 
-    genai.configure(api_key=_get_api_key())
+
+def create_plan(goal: str, context: str = "") -> dict:
     system_prompt = _planner_system_prompt()
     candidates = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-latest"]
     
@@ -414,20 +424,23 @@ def create_plan(goal: str, context: str = "") -> dict:
     if context:
         user_input += f"\n\nContext: {context}"
 
-    text = None
-    for model_name in candidates:
-        try:
-            model = genai.GenerativeModel(
-                model_name=model_name,
-                system_instruction=system_prompt
-            )
-            response = model.generate_content(user_input)
-            if response.text:
-                text = response.text.strip()
-                break
-        except Exception as e:
-            print(f"[Planner] ⚠️ {model_name} planning error: {e}")
-            continue
+    text = _provider_plan_text(system_prompt, user_input)
+    if not text:
+        import google.generativeai as genai
+        genai.configure(api_key=_get_api_key())
+        for model_name in candidates:
+            try:
+                model = genai.GenerativeModel(
+                    model_name=model_name,
+                    system_instruction=system_prompt
+                )
+                response = model.generate_content(user_input)
+                if response.text:
+                    text = response.text.strip()
+                    break
+            except Exception as e:
+                print(f"[Planner] ⚠️ {model_name} planning error: {e}")
+                continue
 
     if not text:
         return _fallback_plan(goal)
@@ -486,9 +499,6 @@ def _fallback_plan(goal: str) -> dict:
 
 
 def replan(goal: str, completed_steps: list, failed_step: dict, error: str) -> dict:
-    import google.generativeai as genai
-
-    genai.configure(api_key=_get_api_key())
     system_prompt = _planner_system_prompt()
     candidates = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-latest"]
 
@@ -506,20 +516,23 @@ Error: {error}
 
 Create a REVISED plan for the remaining work only. Do not repeat completed steps."""
 
-    text = None
-    for model_name in candidates:
-        try:
-            model = genai.GenerativeModel(
-                model_name=model_name,
-                system_instruction=system_prompt
-            )
-            response = model.generate_content(prompt)
-            if response.text:
-                text = response.text.strip()
-                break
-        except Exception as e:
-            print(f"[Planner] ⚠️ {model_name} replan error: {e}")
-            continue
+    text = _provider_plan_text(system_prompt, prompt)
+    if not text:
+        import google.generativeai as genai
+        genai.configure(api_key=_get_api_key())
+        for model_name in candidates:
+            try:
+                model = genai.GenerativeModel(
+                    model_name=model_name,
+                    system_instruction=system_prompt
+                )
+                response = model.generate_content(prompt)
+                if response.text:
+                    text = response.text.strip()
+                    break
+            except Exception as e:
+                print(f"[Planner] ⚠️ {model_name} replan error: {e}")
+                continue
 
     try:
         if not text:
