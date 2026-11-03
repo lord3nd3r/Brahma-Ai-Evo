@@ -37,6 +37,7 @@ DEFAULT_VALUE = ""
 
 _cache: dict[str, list[str]] | None = None
 _cache_lock = threading.Lock()
+_query_lock = threading.RLock()
 
 # Which host API each direction settled on, so resolve() opens the same endpoint
 # the picker listed. Filled in by _query().
@@ -303,6 +304,14 @@ def _query() -> dict[str, list[str]]:
     """Return {'input': [names...], 'output': [names...]}. Never raises.
 
     Only real, selectable devices — see the note above."""
+    # PortAudio is not thread-safe: the startup prefetch thread and the Qt
+    # thread must never probe streams at the same time (on PulseAudio/PipeWire
+    # that aborts the whole process in pa_threaded_mainloop_wait).
+    with _query_lock:
+        return _query_locked()
+
+
+def _query_locked() -> dict[str, list[str]]:
     out: dict[str, list[str]] = {"input": [], "output": []}
     try:
         import platform
@@ -375,9 +384,13 @@ def prefetch() -> None:
     settings drawer never pays for enumeration on the Qt thread."""
     def _work():
         global _cache
-        result = _query()
-        with _cache_lock:
-            _cache = result
+        with _query_lock:
+            with _cache_lock:
+                if _cache is not None:
+                    return
+            result = _query_locked()
+            with _cache_lock:
+                _cache = result
         print(f"[Audio] {len(result['input'])} input / "
               f"{len(result['output'])} output devices found")
     threading.Thread(target=_work, daemon=True, name="audio-devices").start()
@@ -390,9 +403,14 @@ def list_devices(kind: str, refresh: bool = False) -> list[str]:
     with _cache_lock:
         cached = None if refresh else _cache
     if cached is None:
-        cached = _query()
-        with _cache_lock:
-            _cache = cached
+        with _query_lock:
+            # The prefetch may have finished while we waited for the lock.
+            with _cache_lock:
+                cached = None if refresh else _cache
+            if cached is None:
+                cached = _query_locked()
+                with _cache_lock:
+                    _cache = cached
     return list(cached.get(kind, []))
 
 
