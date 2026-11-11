@@ -10,6 +10,7 @@ Unit tests for Brahma AI's Advanced Intelligence Leap:
 """
 
 import time
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 import pytest
@@ -152,7 +153,14 @@ def test_anticipatory_watcher_cycle():
     delivered_nudges = []
     watcher.set_nudge_callback(lambda msg, cat: delivered_nudges.append((msg, cat)))
 
-    with patch("psutil.virtual_memory", return_value=mock_mem):
+    class _Afternoon(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 6, 15, 15, 0, 0)
+
+    with patch("psutil.virtual_memory", return_value=mock_mem), patch(
+        "core.anticipatory_watcher.datetime", _Afternoon
+    ):
         with patch("core.mem_reduct.MemReductEngine.clean_ram", return_value={"freed_mb": 1200.0}):
             res = watcher.run_inspection_cycle()
             assert len(delivered_nudges) == 1
@@ -160,7 +168,9 @@ def test_anticipatory_watcher_cycle():
             assert "1200.0 MB" in delivered_nudges[0][0]
 
     # Cooldown suppresses immediate duplicate nudge
-    with patch("psutil.virtual_memory", return_value=mock_mem):
+    with patch("psutil.virtual_memory", return_value=mock_mem), patch(
+        "core.anticipatory_watcher.datetime", _Afternoon
+    ):
         watcher.run_inspection_cycle()
         assert len(delivered_nudges) == 1
 

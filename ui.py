@@ -12537,6 +12537,7 @@ class SystemConnectivityPage(QWidget):
         lay.addWidget(units_card)
 
         lay.addWidget(self._build_chat_provider_card())
+        lay.addWidget(self._build_response_style_card())
 
         # AI Providers
         card = self._card("AI Providers", "Only the supported providers are shown here.")
@@ -14213,6 +14214,134 @@ class SystemConnectivityPage(QWidget):
         self._refresh_chat_models()
         return card
 
+    def _build_response_style_card(self) -> QFrame:
+        from core.response_style import STYLE_LABELS
+
+        card = self._card(
+            "Response style",
+            "Short style notes for typed chat and text tool calls. "
+            "They sit in front of Brahma's tool instructions. "
+            "Gemini Live voice is unchanged. "
+            "Ollama and llama.cpp use Direct / Rigor until you choose a style.",
+        )
+        lay = card.layout()
+        self._loading_response_style = False
+
+        global_row = QHBoxLayout()
+        global_row.addWidget(QLabel("Style"))
+        self._style_global = QComboBox()
+        for style_id, label in STYLE_LABELS.items():
+            self._style_global.addItem(label, style_id)
+        self._style_global.currentIndexChanged.connect(self._save_global_response_style)
+        global_row.addWidget(self._style_global, 1)
+        lay.addLayout(global_row)
+
+        override_row = QHBoxLayout()
+        self._style_override_label = QLabel("Provider override")
+        self._style_override_label.setMinimumWidth(140)
+        override_row.addWidget(self._style_override_label)
+        self._style_override = QComboBox()
+        self._style_override.addItem("Use global default", "")
+        for style_id, label in STYLE_LABELS.items():
+            self._style_override.addItem(label, style_id)
+        self._style_override.currentIndexChanged.connect(self._save_provider_response_style)
+        override_row.addWidget(self._style_override, 1)
+        lay.addLayout(override_row)
+
+        self._style_note = QLabel("")
+        self._style_note.setWordWrap(True)
+        self._style_note.setStyleSheet(f"color: {C.TEXT_DIM};")
+        lay.addWidget(self._style_note)
+
+        custom_label = QLabel("Custom prompt")
+        lay.addWidget(custom_label)
+        self._style_custom = QTextEdit()
+        self._style_custom.setPlaceholderText(
+            "Optional. Used when the style is Custom. Short labeled chunks work best on small models, about 150 words."
+        )
+        self._style_custom.setFixedHeight(96)
+        self._style_custom.textChanged.connect(self._save_custom_response_style)
+        lay.addWidget(self._style_custom)
+        self._style_custom_hint = QLabel("Saved with your other settings. Leave the style on None / Default to keep today's prompt.")
+        self._style_custom_hint.setWordWrap(True)
+        self._style_custom_hint.setStyleSheet(f"color: {C.TEXT_DIM};")
+        lay.addWidget(self._style_custom_hint)
+        self._load_response_style_controls()
+        return card
+
+    def _response_style_provider_id(self) -> str:
+        if hasattr(self, "_chat_provider"):
+            return self._current_chat_preset().id
+        return "gemini"
+
+    def _load_response_style_controls(self):
+        if not hasattr(self, "_style_global"):
+            return
+        from core.response_style import STYLE_CUSTOM_SETTING, STYLE_LABELS, STYLE_SETTING, describe_resolved_style
+        settings = self._load_app_settings()
+        provider_id = self._response_style_provider_id()
+        provider_label = self._chat_provider.currentText() if hasattr(self, "_chat_provider") else provider_id
+        global_id = str(settings.get(STYLE_SETTING) or "none")
+        if global_id not in STYLE_LABELS:
+            global_id = "none"
+        override_id = str(settings.get(f"response_style_{provider_id}") or "")
+        if override_id not in STYLE_LABELS:
+            override_id = ""
+        global_custom = str(settings.get(STYLE_CUSTOM_SETTING) or "")
+        if override_id == "custom":
+            custom_text = str(settings.get(f"response_style_custom_{provider_id}") or global_custom)
+        else:
+            custom_text = global_custom
+        self._loading_response_style = True
+        self._style_global.blockSignals(True)
+        self._style_override.blockSignals(True)
+        self._style_custom.blockSignals(True)
+        try:
+            self._style_override_label.setText(f"Override for {provider_label}")
+            global_index = self._style_global.findData(global_id)
+            if global_index >= 0:
+                self._style_global.setCurrentIndex(global_index)
+            override_index = self._style_override.findData(override_id)
+            if override_index >= 0:
+                self._style_override.setCurrentIndex(override_index)
+            self._style_custom.setPlainText(custom_text)
+            self._style_note.setText(describe_resolved_style(provider_id, provider_label))
+        finally:
+            self._style_custom.blockSignals(False)
+            self._style_override.blockSignals(False)
+            self._style_global.blockSignals(False)
+            self._loading_response_style = False
+
+    def _save_global_response_style(self):
+        if getattr(self, "_loading_response_style", False) or not hasattr(self, "_style_global"):
+            return
+        from core.response_style import STYLE_SETTING
+        self._set_setting(STYLE_SETTING, str(self._style_global.currentData() or "none"))
+        self._load_response_style_controls()
+
+    def _save_provider_response_style(self):
+        if getattr(self, "_loading_response_style", False) or not hasattr(self, "_style_override"):
+            return
+        provider_id = self._response_style_provider_id()
+        self._set_setting(f"response_style_{provider_id}", str(self._style_override.currentData() or ""))
+        self._load_response_style_controls()
+
+    def _save_custom_response_style(self):
+        if getattr(self, "_loading_response_style", False) or not hasattr(self, "_style_custom"):
+            return
+        from core.response_style import STYLE_CUSTOM_SETTING
+        provider_id = self._response_style_provider_id()
+        override_id = str(self._style_override.currentData() or "")
+        key = f"response_style_custom_{provider_id}" if override_id == "custom" else STYLE_CUSTOM_SETTING
+        self._set_setting(key, self._style_custom.toPlainText())
+        self._style_note.setText(self._response_style_note())
+
+    def _response_style_note(self) -> str:
+        from core.response_style import describe_resolved_style
+        provider_id = self._response_style_provider_id()
+        provider_label = self._chat_provider.currentText() if hasattr(self, "_chat_provider") else provider_id
+        return describe_resolved_style(provider_id, provider_label)
+
     def _current_chat_preset(self):
         from core.llm_providers import get_preset
         preset_id = ""
@@ -14374,6 +14503,7 @@ class SystemConnectivityPage(QWidget):
                 self._sys_provider.setText(provider)
             if self._ctrl() and hasattr(self._ctrl(), "write_log"):
                 self._ctrl().write_log(msg)
+            self._load_response_style_controls()
             return
 
         chat_id = provider_id_from_setting(raw)
@@ -14422,6 +14552,7 @@ class SystemConnectivityPage(QWidget):
             self._default_provider.blockSignals(False)
         self._sync_chat_provider_combo(chat_id)
         self._refresh_chat_models()
+        self._load_response_style_controls()
         if hasattr(self, "_sys_provider"):
             self._sys_provider.setText(provider)
         if self._ctrl() and hasattr(self._ctrl(), "write_log"):
@@ -14584,6 +14715,7 @@ class SystemConnectivityPage(QWidget):
                 self._chat_provider.setCurrentText(get_preset(chat_id).label)
                 self._chat_provider.blockSignals(False)
                 self._show_chat_key(get_preset(chat_id))
+            self._load_response_style_controls()
             if hasattr(self, "_offline_mode_btn"):
                 self._offline_mode_btn.setChecked(is_offline or prov == "Local")
             if hasattr(self, "_local_ai_widget"):

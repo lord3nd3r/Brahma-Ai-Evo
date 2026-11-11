@@ -376,6 +376,12 @@ def _gemini_text_reply(prompt: str) -> str:
         "You are Brahma Evo, a concise, helpful desktop assistant. "
         "Reply naturally and briefly. Do not mention internal implementation details."
     )
+    try:
+        from core.llm_providers import selected_chat_preset
+        from core.response_style import compose_system_prompt
+        system_prompt = compose_system_prompt(system_prompt, provider_id=selected_chat_preset().id)
+    except Exception:
+        pass
     response = client.models.generate_content(
         model="gemini-2.5-flash",
         contents=f"{system_prompt}\n\nUser: {prompt}",
@@ -5153,11 +5159,15 @@ class BrahmaLive:
                         output="Processing on OpenRouter...",
                         percent=50,
                     )
+                    from core.response_style import compose_system_prompt
                     reply = openrouter_client.chat(
                         request_text,
-                        system=(
-                            "You are Brahma Evo, a concise, helpful desktop assistant. "
-                            "Reply naturally and briefly. Do not mention internal implementation details."
+                        system=compose_system_prompt(
+                            (
+                                "You are Brahma Evo, a concise, helpful desktop assistant. "
+                                "Reply naturally and briefly. Do not mention internal implementation details."
+                            ),
+                            provider_id="openrouter",
                         ),
                     )
                     print("[BRAHMA EVO] 🌐 OpenRouter answered successfully!")
@@ -5191,13 +5201,17 @@ class BrahmaLive:
                         prompt_txt = "You are Brahma Evo, the autonomous desktop operating system."
 
                     from core.units import prompt_clause
-                    system_prompt = (
-                        f"{prompt_txt}\n\n{prompt_clause()}\n\n"
-                        "CRITICAL OPERATING SYSTEM DIRECTIVE:\n"
-                        "- You have FULL DIRECT ACCESS and authority over this Windows PC via your tools.\n"
-                        "- NEVER state that you are a text-based AI, that you cannot perform automations, or that you lack real-time access.\n"
-                        "- Whenever the user requests an action (opening an app, changing volume, setting a reminder, running a protocol, organizing files, searching, etc.), ALWAYS call the corresponding tool.\n"
-                        "- Keep responses concise, direct, and conversational."
+                    from core.response_style import compose_system_prompt
+                    system_prompt = compose_system_prompt(
+                        (
+                            f"{prompt_txt}\n\n{prompt_clause()}\n\n"
+                            "CRITICAL OPERATING SYSTEM DIRECTIVE:\n"
+                            "- You have FULL DIRECT ACCESS and authority over this Windows PC via your tools.\n"
+                            "- NEVER state that you are a text-based AI, that you cannot perform automations, or that you lack real-time access.\n"
+                            "- Whenever the user requests an action (opening an app, changing volume, setting a reminder, running a protocol, organizing files, searching, etc.), ALWAYS call the corresponding tool.\n"
+                            "- Keep responses concise, direct, and conversational."
+                        ),
+                        provider_id="local",
                     )
 
                     messages = [
@@ -5264,7 +5278,17 @@ class BrahmaLive:
             if not reply and not is_offline_mode:
                 if self._use_openrouter_first and (is_cloud_gemini or (text_preset is not None and text_preset.id == "grok")):
                     try:
-                        reply = openrouter_client.chat(request_text)
+                        from core.response_style import compose_system_prompt
+                        reply = openrouter_client.chat(
+                            request_text,
+                            system=compose_system_prompt(
+                                (
+                                    "You are a component of Brahma Evo, an autonomous self-evolving personal assistant. "
+                                    "Be concise, helpful, and precise."
+                                ),
+                                provider_id=text_preset.id if text_preset is not None else "gemini",
+                            ),
+                        )
                     except Exception:
                         pass
                 elif is_cloud_openrouter:
@@ -5276,10 +5300,16 @@ class BrahmaLive:
             # 4. Ultimate offline safety net: Local Brain fallback
             if not reply and local_brain.is_available():
                 try:
-                    res = local_brain.chat_complete([
-                        {"role": "system", "content": "You are Brahma Evo, the autonomous desktop operating system. You control this PC. Never claim you cannot do automations."},
-                        {"role": "user", "content": request_text}
-                    ], model=local_model_target, tools=TOOL_DECLARATIONS, focus_core=True)
+                    from core.response_style import apply_style_to_messages
+                    res = local_brain.chat_complete(
+                        apply_style_to_messages([
+                            {"role": "system", "content": "You are Brahma Evo, the autonomous desktop operating system. You control this PC. Never claim you cannot do automations."},
+                            {"role": "user", "content": request_text}
+                        ], "local"),
+                        model=local_model_target,
+                        tools=TOOL_DECLARATIONS,
+                        focus_core=True,
+                    )
                     msg_net = res.get("choices", [{}])[0].get("message", {})
                     tc_net = msg_net.get("tool_calls")
                     if tc_net:

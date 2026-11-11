@@ -49,6 +49,21 @@ class UnifiedAIClient:
         from core.llm_providers import provider_id_from_setting
         return provider_id_from_setting(self._provider) in {"grok", "ollama", "llamacpp"}
 
+    def _style_provider_id(self) -> str:
+        from core.llm_providers import provider_id_from_setting
+        if str(self._provider or "").strip().lower() == "local":
+            return "local"
+        return provider_id_from_setting(self._provider)
+
+    def _styled_system(self, system: str) -> str:
+        """Prepend the response style. None / Default returns the original text."""
+        from core.response_style import compose_system_prompt
+        return compose_system_prompt(system, provider_id=self._style_provider_id())
+
+    def _styled_messages(self, messages: list[dict]) -> list[dict]:
+        from core.response_style import apply_style_to_messages
+        return apply_style_to_messages(messages, self._style_provider_id())
+
     def _local_chat_completion(self, messages: list[dict], temperature: float = 0.7, response_format: Optional[dict] = None) -> Optional[str]:
         payload = {
             "model": self._local_model,
@@ -125,6 +140,7 @@ class UnifiedAIClient:
 
     def chat(self, prompt: str, system: str = "You are a helpful assistant.", history: Optional[list[dict]] = None, model: Optional[str] = None, max_tokens: int = 4096, temperature: float = 0.7) -> str:
         self.reload_settings()
+        system = self._styled_system(system)
         messages = [{"role": "system", "content": system}]
         if history:
             messages.extend(history)
@@ -165,8 +181,9 @@ class UnifiedAIClient:
     def chat_json(self, prompt: str, system: str = "Return ONLY valid JSON.", model: Optional[str] = None, max_tokens: int = 4096) -> dict:
         self.reload_settings()
         if self._provider in ("Gemini", "Google Gemini") or self._uses_openai_text_provider():
+            styled = self._styled_system(system + " Output valid JSON only, without any markdown formatting.")
             messages = [
-                {"role": "system", "content": system + " Output valid JSON only, without any markdown formatting."},
+                {"role": "system", "content": styled},
                 {"role": "user", "content": prompt}
             ]
             if self._uses_openai_text_provider():
@@ -182,7 +199,7 @@ class UnifiedAIClient:
                 raw = self._gemini_chat_completion(messages, temperature=0.2, json_mode=True)
             if not raw:
                 try:
-                    return openrouter_client.chat_json(prompt, system, model, max_tokens)
+                    return openrouter_client.chat_json(prompt, self._styled_system(system), model, max_tokens)
                 except Exception:
                     pass
                 raw = self._local_chat_completion(messages, temperature=0.2, response_format={"type": "json_object"})
@@ -202,7 +219,7 @@ class UnifiedAIClient:
                 raise ValueError(f"Gemini model returned unparseable JSON: {e}\nRaw output: {raw[:200]}")
         elif self._provider == "Local":
             messages = [
-                {"role": "system", "content": system + " Output valid JSON only, without any markdown formatting."},
+                {"role": "system", "content": self._styled_system(system + " Output valid JSON only, without any markdown formatting.")},
                 {"role": "user", "content": prompt}
             ]
             raw = self._local_chat_completion(messages, temperature=0.2, response_format={"type": "json_object"})
@@ -222,7 +239,7 @@ class UnifiedAIClient:
             except json.JSONDecodeError as e:
                 raise ValueError(f"Local model returned unparseable JSON: {e}\nRaw output: {raw[:200]}")
         else:
-            return openrouter_client.chat_json(prompt, system, model, max_tokens)
+            return openrouter_client.chat_json(prompt, self._styled_system(system), model, max_tokens)
 
     def vision(self, prompt: str, image_b64: str, mime: str = "image/png", system: str = "Analyze the image.", model: Optional[str] = None, max_tokens: int = 1024) -> str:
         self.reload_settings()
@@ -286,6 +303,7 @@ class UnifiedAIClient:
 
     def multi_turn(self, messages: list[dict], model: Optional[str] = None, max_tokens: int = 4096, temperature: float = 0.7) -> str:
         self.reload_settings()
+        messages = self._styled_messages(messages)
         if self._uses_openai_text_provider():
             from core.llm_providers import try_provider_messages
             text, notice = try_provider_messages(messages)

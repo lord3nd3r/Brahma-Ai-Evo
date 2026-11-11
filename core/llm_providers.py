@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 import requests
 
+from core.response_style import apply_style_to_messages
 from memory import config_manager
 
 
@@ -375,10 +376,13 @@ def complete_text(
         preset,
         api_key=api_key,
         model=chosen,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
+        messages=apply_style_to_messages(
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            preset.id,
+        ),
         http_post=http_post,
     )
     return result["content"]
@@ -408,10 +412,13 @@ def reply_with_tools(
         preset,
         api_key=api_key,
         model=chosen,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
+        messages=apply_style_to_messages(
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            preset.id,
+        ),
         gemini_tools=gemini_tools,
         execute_tool=execute_tool,
         http_post=http_post,
@@ -454,7 +461,7 @@ def try_provider_messages(messages: list[dict]) -> tuple[str | None, str]:
             preset,
             api_key=api_key,
             model=model,
-            messages=messages,
+            messages=apply_style_to_messages(messages, preset.id),
         )
         text = (result.get("content") or "").strip()
         if not text and not result.get("tool_calls"):
